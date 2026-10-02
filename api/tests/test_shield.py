@@ -297,3 +297,43 @@ def test_bec_sender_does_not_hijack_acme(shield: Shield) -> None:
     assert text_of(s, "Chase the Acme invoice") == "Chase the [[ORG_1]] invoice"
     bec = text_of(s, "from billing@acme-logistics-payments.example")
     assert "acme" not in bec.casefold() and "[[EMAIL_" in bec
+
+
+# --- regression: identifiers right after JSON escape sequences (live finding during T2.2) -------
+# Tool results reach the proxy as JSON nested in JSON, so a newline can arrive as the literal
+# characters backslash + n (or \\n). The "n" used to defeat the word boundary before "Rahul".
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Best,\\nRahul Verma\\nCFO, Acme Logistics",
+        "Best,\\\\nRahul Verma\\\\nCFO, Acme Logistics",
+        'Best,\\"Rahul\\" and \\tRahul',
+        "From: \\u0052ahul Verma",
+    ],
+)
+def test_names_after_json_escapes_are_masked(shield: Shield, text: str) -> None:
+    out = text_of(shield, text)
+    assert "rahul" not in out.casefold() and "acme" not in out.casefold(), out
+
+
+def test_escaped_non_ascii_name_is_masked(shield: Shield) -> None:
+    out = text_of(shield, 'note: \\"Zo\\u00eb \\u00d8deg\\u00e5rd\\" asked')
+    assert "zo\\u00eb" not in out.casefold() and "[[PERSON_" in out, out
+
+
+def test_email_after_escape_is_not_prefixed(shield: Shield) -> None:
+    out = text_of(shield, "to:\\nrahul.verma@acme-logistics.example")
+    assert out == "to:\\n[[EMAIL_1]]", out
+    with db.connect() as conn:
+        values = [r[0] for r in conn.execute("SELECT value FROM vault WHERE kind='EMAIL'")]
+    assert values == ["rahul.verma@acme-logistics.example"]
+
+
+def test_currency_symbol_is_not_doubled_on_reidentification(shield: Shield) -> None:
+    text_of(shield, "total $4,800")
+    restored, _, _ = shield.inbound(
+        {"choices": [{"message": {"content": "for $[[MONEY_1]] USD, i.e. [[MONEY_1]]"}}]}
+    )
+    assert restored["choices"][0]["message"]["content"] == "for $4,800 USD, i.e. $4,800"

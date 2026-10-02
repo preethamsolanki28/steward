@@ -116,7 +116,7 @@ How to tick:
   - Lockdown:
     - `platform_toolsets: {api_server: [memory, session_search, skills, steward], cron: [memory, skills, steward]}`
     - `agent.disabled_toolsets: [web, browser, terminal, file, code_execution, delegation]`
-  - Record the exact function names the model sees. They feed the T2.2 allowlist: the 9 `mcp__steward__*` tools, memory, session_search, skill_view, skills_list. Also record which request fields and paths carry text, including auxiliary calls; these feed the T2.1 skip-list.
+  - Record the exact function names the model sees. They feed the T2.2 allowlist: the 9 `mcp__steward__*` tools, memory, session_search, skill_view, skills_list (+ skill_manage, allowlisted 2026-10-02). Also record which request fields and paths carry text, including auxiliary calls; these feed the T2.1 skip-list.
   - Confirm that the same `X-Hermes-Session-Id` reloads history from `state.db`, and that a new session id gets a fresh memory snapshot.
   - Jobs API: create, run and one-shot; what happens to a missed run while the Mac sleeps; the exact healthcheck endpoint on 8642, which goes into compose.
   - Skills setup: `skills.external_dirs: [/opt/steward-skills]` loads, and `/opt/data/.no-bundled-skills` exists before first boot.
@@ -245,7 +245,7 @@ How to tick:
   - Placeholders: `[[PERSON_n]]`, `[[EMAIL_n]]`, `[[ORG_n]]`, `[[DOMAIN_n]]`, `[[PHONE_n]]`, `[[ACCOUNT_n]]`, `[[MONEY_n]]`. They are stable forever via `vault`, and every alias maps to its canonical value's placeholder.
   - Re-identification handles every response leaf (`content`, `reasoning_content`, `reasoning`, `tool_calls[].function.arguments`). It uses the tolerant matcher `\[{1,2}\s*([A-Za-z]+)_(\d+)\s*\]{1,2}`; unknown placeholders are left in place and counted.
   - Tests go in `tests/test_shield.py`.
-- [ ] **T2.2** — Proxy full: stream rejection, tool allowlist, steward-auto chain, reasoning_effort injection, upstream stream:false, 60 s + 1 retry + fallback, escalation on malformed tool calls, other-path 404 + blocked row — E1 — 6h
+- [x] **T2.2** — Proxy full: stream rejection, tool allowlist, steward-auto chain, reasoning_effort injection, upstream stream:false, 60 s + 1 retry + fallback, escalation on malformed tool calls, other-path 404 + blocked row — E1 — 6h
   - Request checks:
     - Bearer `STEWARD_PROXY_KEY`. `stream:true` → 400.
     - A `tools[]` name outside the T0.4 allowlist → `policy_block`.

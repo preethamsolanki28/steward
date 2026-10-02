@@ -74,10 +74,10 @@ class LeakChecker:
                 hits.append(Hit(start, start + len(secret), "SECRET"))
                 start = text.find(secret, start + 1)
         if self.regex is not None and text:
-            norm, idx = normalized_view(text)
+            norm, starts, ends = normalized_view(text)
             for m in self.regex.finditer(norm):
                 kind = self.kind_by_key.get(" ".join(m.group(0).split()), "IDENTIFIER")
-                hits.append(Hit(idx[m.start()], idx[m.end() - 1] + 1, kind))
+                hits.append(Hit(starts[m.start()], ends[m.end() - 1], kind))
         hits.sort(key=lambda h: (h.start, -(h.end - h.start)))
         merged: list[Hit] = []
         for h in hits:

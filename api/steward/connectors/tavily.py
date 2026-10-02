@@ -10,7 +10,6 @@ leak checker's vault values, contact aliases (>= 4 chars) and secret env values.
 (incl. ORG, MONEY, DOMAIN) blocks the query.
 """
 
-import json
 import sqlite3
 import time
 from typing import Any
@@ -19,13 +18,13 @@ import httpx
 
 from steward import db
 from steward.config import get_settings
+from steward.ledger import store
 from steward.shield import Shield
 from steward.shield.detectors import find_spans
 
 TAVILY_URL = "https://api.tavily.com/search"
 DESTINATION = "api.tavily.com"
 MAX_QUERY_CHARS = 120
-BLOCK_SUMMARY = "Blocked: identifier would have left the Mac"
 
 
 class SearchBlocked(Exception):
@@ -59,26 +58,6 @@ def mask_blocked(query: str, spans: list[tuple[int, int, str]]) -> str:
     return "".join(out)
 
 
-def _egress(
-    conn: sqlite3.Connection, request: dict[str, Any], response: Any, status: str, latency_ms: int
-) -> int:
-    cur = conn.execute(
-        "INSERT INTO egress_events (ts, channel, destination, model, escalated_from, "
-        "request_redacted, response_redacted, entities_masked, entity_kinds, prompt_tokens, "
-        "completion_tokens, latency_ms, cost_usd, status) "
-        "VALUES (?, 'web', ?, NULL, NULL, ?, ?, 0, '{}', NULL, NULL, ?, 0, ?)",
-        (
-            db.now_iso(),
-            DESTINATION,
-            json.dumps(request, ensure_ascii=False),
-            None if response is None else json.dumps(response, ensure_ascii=False),
-            latency_ms,
-            status,
-        ),
-    )
-    return int(cur.lastrowid or 0)
-
-
 async def search(client: httpx.AsyncClient, query: str, max_results: int = 5) -> list[dict]:
     settings = get_settings()
     final = " ".join(query.split())[:MAX_QUERY_CHARS]
@@ -89,8 +68,13 @@ async def search(client: httpx.AsyncClient, query: str, max_results: int = 5) ->
         spans = find_identifiers(conn, final)
         if spans:
             masked = {"query": mask_blocked(final, spans), "max_results": max_results}
-            row = _egress(conn, masked, None, "blocked", 0)
-            db.audit(conn, "policy_block", BLOCK_SUMMARY, ref_table="egress_events", ref_id=row)
+            store.insert(
+                conn,
+                channel="web",
+                destination=DESTINATION,
+                status="blocked",
+                request_redacted=masked,
+            )
         return bool(spans)
 
     if await db.run(guard):
@@ -127,8 +111,15 @@ async def search(client: httpx.AsyncClient, query: str, max_results: int = 5) ->
     ]
 
     def log(conn: sqlite3.Connection) -> None:
-        row = _egress(conn, request, results if status == "ok" else payload, status, latency)
-        db.audit(conn, "egress", "Tavily search", ref_table="egress_events", ref_id=row)
+        store.insert(
+            conn,
+            channel="web",
+            destination=DESTINATION,
+            status=status,
+            request_redacted=request,
+            response_redacted=results if status == "ok" else payload,
+            latency_ms=latency,
+        )
 
     await db.run(log)
     if status != "ok":

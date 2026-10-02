@@ -30,17 +30,45 @@ class Span:
 # --- normalized view with an index map back to the original text --------------------------------
 
 
-def normalized_view(text: str) -> tuple[str, list[int]]:
-    """Per-character NFKC + casefold. idx[i] is the original index of normalized char i; a final
-    sentinel maps the end. Lets spans found on the normalized text be applied to the original."""
+# JSON escape runs inside strings (tool results are JSON nested in JSON, so a newline can reach us
+# as the two characters backslash + n, or more backslashes). Without this, "\\nRahul" would put
+# a word character right before the name and defeat the word boundary (live finding, T2.2).
+_ESCAPE = re.compile(r"\\+(?:u([0-9a-fA-F]{4})|[nrtbf\"/\\])")
+
+
+def normalized_view(text: str) -> tuple[str, list[int], list[int]]:
+    """Per-character NFKC + casefold, with JSON escape runs turned into a separator (or, for
+    \\uXXXX, the decoded character). starts[i] / ends[i] give the original span covered by
+    normalized char i, so matches on the normalized text map back exactly."""
     out: list[str] = []
-    idx: list[int] = []
-    for i, ch in enumerate(text):
-        norm = unicodedata.normalize("NFKC", ch).casefold()
-        out.append(norm)
-        idx.extend([i] * len(norm))
-    idx.append(len(text))
-    return "".join(out), idx
+    starts: list[int] = []
+    ends: list[int] = []
+    i, n = 0, len(text)
+    while i < n:
+        if text[i] == "\\":
+            m = _ESCAPE.match(text, i)
+            if m:
+                code = m.group(1)
+                ch = chr(int(code, 16)) if code else " "
+                if 0xD800 <= ord(ch) <= 0xDFFF:
+                    ch = " "
+                for c in unicodedata.normalize("NFKC", ch).casefold() or " ":
+                    out.append(c)
+                    starts.append(i)
+                    ends.append(m.end())
+                i = m.end()
+                continue
+        for c in unicodedata.normalize("NFKC", text[i]).casefold():
+            out.append(c)
+            starts.append(i)
+            ends.append(i + 1)
+        i += 1
+    return "".join(out), starts, ends
+
+
+def regex_view(text: str) -> str:
+    """Same length as `text`, with JSON escape runs blanked, so regex spans keep their indices."""
+    return _ESCAPE.sub(lambda m: " " * len(m.group(0)), text)
 
 
 @lru_cache(maxsize=64)
@@ -60,14 +88,15 @@ class AliasIndex:
     def find(self, text: str) -> list[Span]:
         if self.regex is None or not text:
             return []
-        norm, idx = normalized_view(text)
+        norm, starts, ends = normalized_view(text)
         spans = []
         for m in self.regex.finditer(norm):
             alias = self.by_key.get(" ".join(m.group(0).split()))
             if alias is None:
                 continue
-            start, end = idx[m.start()], idx[m.end() - 1] + 1
-            spans.append(Span(start, end, alias.kind, alias.canonical, "alias"))
+            spans.append(
+                Span(starts[m.start()], ends[m.end() - 1], alias.kind, alias.canonical, "alias")
+            )
         return spans
 
 
@@ -120,11 +149,13 @@ def _luhn(digits: str) -> bool:
 
 
 def regex_spans(text: str) -> list[Span]:
+    original = text
+    text = regex_view(text)
     spans: list[Span] = []
 
     def add(pattern: re.Pattern[str], kind: str, detector: str, group: int = 0) -> None:
         for m in pattern.finditer(text):
-            value = m.group(group)
+            value = original[m.start(group) : m.end(group)] if m.group(group) else ""
             if value:
                 start, end = m.start(group), m.end(group)
                 canonical = value.lower() if detector == "EMAIL" else " ".join(value.split())
@@ -147,7 +178,7 @@ def regex_spans(text: str) -> list[Span]:
 
 
 def protected_spans(text: str) -> list[tuple[int, int]]:
-    return [(m.start(), m.end()) for m in _PROTECTED.finditer(text)]
+    return [(m.start(), m.end()) for m in _PROTECTED.finditer(regex_view(text))]
 
 
 def find_spans(text: str, index: AliasIndex) -> list[Span]:

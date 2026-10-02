@@ -21,6 +21,9 @@ from steward.shield.vault import Vault
 SKIP_KEYS = frozenset({"model", "role", "tool_call_id", "id", "type", "name"})
 SKIP_TOP = frozenset({"tools", "response_format"})
 TOLERANT = re.compile(r"\[{1,2}\s*([A-Za-z]+)_(\d+)\s*\]{1,2}")
+# Same placeholder, plus an optional currency symbol the model put in front of a MONEY
+# placeholder ("$[[MONEY_1]]"), so re-identification does not produce "$$4,800".
+_TOLERANT_WITH_CURRENCY = re.compile(r"([$₹]\s?)?\[{1,2}\s*([A-Za-z]+)_(\d+)\s*\]{1,2}")
 
 
 def _walk(obj: Any, fn: Callable[[str], str], parent_key: str | None, in_function: bool) -> Any:
@@ -108,15 +111,19 @@ class Reidentifier:
 
     def __call__(self, text: str) -> str:
         def sub(m: re.Match[str]) -> str:
-            placeholder = f"[[{m.group(1).upper()}_{int(m.group(2))}]]"
+            currency = m.group(1) or ""
+            kind = m.group(2).upper()
+            placeholder = f"[[{kind}_{int(m.group(3))}]]"
             value = self.vault.value(placeholder)
             if value is None:
                 self.unknown += 1
                 return m.group(0)
             self.restored += 1
-            return value
+            if currency and kind == "MONEY" and value.startswith(currency.strip()):
+                currency = ""
+            return currency + value
 
-        return TOLERANT.sub(sub, text)
+        return _TOLERANT_WITH_CURRENCY.sub(sub, text)
 
 
 def _walk_all(obj: Any, fn: Callable[[str], str], parent_key: str | None = None) -> Any:
