@@ -20,7 +20,7 @@ If the team falls behind, the cut list in docs/04 applies in its exact order. It
 - **Two reusable skills** (`skills/*/SKILL.md`, mounted read-only):
   - `invoice-chase`: find the overdue invoice and the latest thread, draft a reminder in the tone the client prefers, then queue `mail_send`.
   - `morning-brief`: a Hermes cron job that runs daily at 08:00 Asia/Kolkata and can also be triggered on demand. It collects client mail needing replies, overdue invoices, and a Tavily search on each client's **watch topics, never client names**, then calls `brief_save`.
-- **Tools come only from our MCP server `steward-tools`** at `/mcp`. The model sees them as `mcp_steward_<tool>`: mail_search, mail_read, mail_send, files_list, files_read, files_write, contacts_lookup, web_search, brief_save. Hermes's own web, browser, terminal, file, code_execution and delegation toolsets are disabled.
+- **Tools come only from our MCP server `steward-tools`** at `/mcp`. The model sees them as `mcp__steward__<tool>`: mail_search, mail_read, mail_send, files_list, files_read, files_write, contacts_lookup, web_search, brief_save. Hermes's own web, browser, terminal, file, code_execution and delegation toolsets are disabled.
 
 **Why it matters for judging**
 - **Stage One gate (pass/fail).** Every agent step is a runtime call to Token Factory with an NVIDIA open model.

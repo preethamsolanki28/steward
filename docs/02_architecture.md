@@ -128,10 +128,10 @@ sequenceDiagram
     P->>P: Shield 8-10 - escalate if malformed, re-identify, egress_events llm row
     P-->>H: ChatCompletion with real values restored
     alt Tool call is files_read, mail_search or mail_read
-      H->>M: mcp_steward_files_read invoices/INV-0042.md (Bearer STEWARD_MCP_TOKEN)
+      H->>M: mcp__steward__files_read invoices/INV-0042.md (Bearer STEWARD_MCP_TOKEN)
       M-->>H: Result wrapped as untrusted, audit tool_call row
     else Tool call is mail_send
-      H->>M: mcp_steward_mail_send(to, subject, body, in_reply_to)
+      H->>M: mcp__steward__mail_send(to, subject, body, in_reply_to)
       M->>G: Insert actions row - pending, preview, risk, risk_reasons
       G-->>M: risk low (trusted contact, no placeholders)
       M-->>H: Queued for approval as action N. The user will review it.
@@ -400,19 +400,19 @@ Any other `/v1/*` path → 404 + ledger row status `'blocked'`.
 
 ### MCP tools — `POST /mcp` (server `steward-tools`, registered in Hermes as `steward`; called by Hermes only)
 
-The model sees each tool as `mcp_steward_<name>`. Every call writes an `audit_events(kind='tool_call')` row.
+The model sees each tool as `mcp__steward__<name>`. Every call writes an `audit_events(kind='tool_call')` row.
 
 | Tool                | Model sees                      | Input                                         | Output                                   | Notes                                                                                                              |
 | ------------------- | ------------------------------- | --------------------------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `mail_search`     | `mcp_steward_mail_search`     | `query, limit=10`                           | `[{id, from, subject, date, snippet}]` | Upserts every From/To/Cc name + address into `contacts` (source `'mail'`, trusted 0, org NULL)                  |
-| `mail_read`       | `mcp_steward_mail_read`       | `id`                                        | `{id, from, to, subject, date, body}`  | Body wrapped as untrusted; same header upsert                                                                      |
-| `mail_send`       | `mcp_steward_mail_send`       | `to: string[], subject, body, in_reply_to?` | `{action_id, status:'pending', risk}`  | Never sends. Creates a pending action; message "Queued for approval as action #`<id>`. The user will review it." |
-| `files_list`      | `mcp_steward_files_list`      | `dir=''`                                    | `[{path, size, modified}]`             | `safe_path` under `WORKSPACE_DIR`                                                                              |
-| `files_read`      | `mcp_steward_files_read`      | `path`                                      | `{path, content}`                      | `safe_path`; untrusted-wrapped                                                                                   |
-| `files_write`     | `mcp_steward_files_write`     | `path, content`                             | `{action_id, status:'pending', risk}`  | Never writes. Pending action; existing path → High                                                                |
-| `contacts_lookup` | `mcp_steward_contacts_lookup` | `query`                                     | `[{name, email, org, trusted}]`        | Read-only                                                                                                          |
-| `web_search`      | `mcp_steward_web_search`      | `query, max_results=5`                      | `[{title, url, snippet}]`              | Tavily; identifier guard; query capped at 120 chars; ledger `'web'` row; untrusted-wrapped                        |
-| `brief_save`      | `mcp_steward_brief_save`      | `content_md`                                | `{brief_id}`                           | Writes `briefs`                                                                                                   |
+| `mail_search`     | `mcp__steward__mail_search`     | `query, limit=10`                           | `[{id, from, subject, date, snippet}]` | Upserts every From/To/Cc name + address into `contacts` (source `'mail'`, trusted 0, org NULL)                  |
+| `mail_read`       | `mcp__steward__mail_read`       | `id`                                        | `{id, from, to, subject, date, body}`  | Body wrapped as untrusted; same header upsert                                                                      |
+| `mail_send`       | `mcp__steward__mail_send`       | `to: string[], subject, body, in_reply_to?` | `{action_id, status:'pending', risk}`  | Never sends. Creates a pending action; message "Queued for approval as action #`<id>`. The user will review it." |
+| `files_list`      | `mcp__steward__files_list`      | `dir=''`                                    | `[{path, size, modified}]`             | `safe_path` under `WORKSPACE_DIR`                                                                              |
+| `files_read`      | `mcp__steward__files_read`      | `path`                                      | `{path, content}`                      | `safe_path`; untrusted-wrapped                                                                                   |
+| `files_write`     | `mcp__steward__files_write`     | `path, content`                             | `{action_id, status:'pending', risk}`  | Never writes. Pending action; existing path → High                                                                |
+| `contacts_lookup` | `mcp__steward__contacts_lookup` | `query`                                     | `[{name, email, org, trusted}]`        | Read-only                                                                                                          |
+| `web_search`      | `mcp__steward__web_search`      | `query, max_results=5`                      | `[{title, url, snippet}]`              | Tavily; identifier guard; query capped at 120 chars; ledger `'web'` row; untrusted-wrapped                        |
+| `brief_save`      | `mcp__steward__brief_save`      | `content_md`                                | `{brief_id}`                           | Writes `briefs`                                                                                                   |
 
 ### Control plane — `/api` (JSON; called by the dashboard only)
 
@@ -462,7 +462,7 @@ Hermes assembles each LLM step: its system prompt with the frozen memory snapsho
 Every `/v1/chat/completions` call then passes the Privacy Shield before anything leaves (steps 1–7):
 
 1. Verify Bearer `STEWARD_PROXY_KEY`. Reject `stream:true` with HTTP 400 (Hermes is configured `streaming:false` and falls back automatically). Any other `/v1/*` path → 404 + ledger row status `'blocked'`.
-2. **Tool allowlist:** if `tools[]` contains a function name outside {the 9 `mcp_steward_*` tools, memory, session_search, skill_view, skills_list} (exact names recorded in T0.4) → block (policy_block).
+2. **Tool allowlist:** if `tools[]` contains a function name outside {the 9 `mcp__steward__*` tools, memory, session_search, skill_view, skills_list} (exact names recorded in T0.4) → block (policy_block).
 3. **Model resolution:** ignore the requested model (`steward-auto`); use `settings.model_primary` → `model_fallback` → `MODEL_FALLBACK_2`. Only these allowlisted Nemotron IDs ever leave. Inject `reasoning_effort` from `settings.reasoning_effort`. Upstream is always `stream:false`.
 4. **Neutralize** pre-existing placeholder syntax in inbound text (`[[`/`]]` → `⟦`/`⟧`) so only proxy-minted placeholders can ever be re-identified.
 5. **`walk_strings`:** visit every string leaf of the request except a skip-list (`model`, `role`, `tool_call_id`, `id`, `type`, `function.name`, and `tools[]` definitions); JSON-parse each `function.arguments`, process its leaves, re-serialize with `ensure_ascii=False`. Detectors (NFKC + casefold, Unicode word boundaries, optional possessive `'s`/`’s`, longest-match-first):
@@ -532,7 +532,7 @@ Every `/v1/chat/completions` call then passes the Privacy Shield before anything
 
 #### Prompt
 
-- The `morning-brief` SKILL.md: client mail needing replies + overdue invoices + Tavily search on each client's `watch_topics` (from client-note frontmatter), **never client names** → end by calling `brief_save`. Uses `mcp_steward_*` names and the untrusted-content rule.
+- The `morning-brief` SKILL.md: client mail needing replies + overdue invoices + Tavily search on each client's `watch_topics` (from client-note frontmatter), **never client names** → end by calling `brief_save`. Uses `mcp__steward__*` names and the untrusted-content rule.
 - Toolset `cron: [memory, skills, steward]`.
 - Every LLM step passes Shield steps 1–7 exactly as in 7a.
 
@@ -596,7 +596,7 @@ Tested by T0.3 / DG-1 (section 10) before any feature work depends on it.
 
 ### T0.3 — riskiest-assumption test + DG-1 (E1, Day 1–2, 7h)
 
-- **Setup:** Hermes (pinned image) → a minimal passthrough proxy (verifies key, injects `reasoning_effort`, forwards to Token Factory, records request/response) → stub MCP server named `steward` with 3 tools (`files_read`, `mail_search`, `mail_send`) over a self-contained Acme fixture (INV-0042, 2 emails, 2 contacts). The stub name gives the same model-visible names as production (`mcp_steward_files_read`, …).
+- **Setup:** Hermes (pinned image) → a minimal passthrough proxy (verifies key, injects `reasoning_effort`, forwards to Token Factory, records request/response) → stub MCP server named `steward` with 3 tools (`files_read`, `mail_search`, `mail_send`) over a self-contained Acme fixture (INV-0042, 2 emails, 2 contacts). The stub name gives the same model-visible names as production (`mcp__steward__files_read`, …).
 - **Runs:** the invoice-chase prompt 10× for each of {Lightning, Super} × {plain fixture, hand-pseudonymized fixture} = **40 runs**.
 - **Scoring:** automated scorer (`api/tests/harness_t03.py`).
 - **By-product:** record a real Token Factory response fixture for tests.
@@ -693,6 +693,7 @@ Hermes never receives `NEBIUS_API_KEY`, `TAVILY_API_KEY` or SMTP credentials.
 | DG-1 | **DG-1 result (2026-10-02, T0.3, 40 runs):** PASS; primary model `nvidia/Nemotron-3_5-Lightning`; fallback `nvidia/nemotron-3-super-120b-a12b` (2nd fallback `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B`, unchanged); `reasoning_effort` `low`; fail-ladder step taken: none | | Numbers in the DG-1 table below |
 | DG-2 | **DG-2 result (2026-10-02, T0.4):** FAIL (3/5); demo path: dashboard edit (Memory & Skills → add entry → Save → New chat). Rahul's tone line stays unseeded. | | Attempts in the DG-2 table below |
 | Pin  | **Hermes image digest (T0.4):** `nousresearch/hermes-agent@sha256:fca358f12efd65bfaaca05884166f15c0e2788375ca30d77061ac1ebc96452b7` (v2026.9.24, multi-arch index: amd64 `sha256:2fd023efbb8d…`, arm64 `sha256:93b4e2877a2f…`); pinned in docker-compose.yml | | Rule 9 |
+| Names | **MCP tool names (T0.4, decided 2026-10-02):** Hermes v2026.9.24 exposes the steward MCP tools as `mcp__steward__<tool>` (double underscores). The docs, the skills and the T2.2 allowlist use these real names; server-side tool names (`files_read`, …) are unchanged. | `mcp_steward_<tool>` (single underscores; never what Hermes sends) | Measured in T0.4; the user chose the real names |
 
 **DG-1 results (measured 2026-10-02 with `api/tests/harness_t03.py`, `reasoning_effort=low`; copy to the README and the video):**
 
@@ -734,7 +735,7 @@ Evidence: `data/t03/recordings/` (local) and `api/tests/fixtures/recorded/`. Con
 | --- | --- |
 | Config path | `/opt/data/config.yaml` is read. Hermes rewrites it on every boot (adds `_config_version: 46`, backups in `/opt/data/backups/config/`); harmless because `make up` re-renders it. |
 | Toolset lockdown | `platform_toolsets` + `agent.disabled_toolsets` work. v2026.9.24 also needs `tools.tool_search.enabled: "off"`: by default MCP tools are hidden behind three bridge tools (`tool_search`, `tool_describe`, `tool_call`) and `session_search` is deferred. And `mcp_servers.steward.tools: {resources: false, prompts: false}`, otherwise Hermes adds `mcp__steward__{list_resources,read_resource,list_prompts,get_prompt}`. |
-| Exact tool names the model sees (feed the T2.2 allowlist) | `mcp__steward__<tool>` (double underscores, e.g. `mcp__steward__files_read`, `mcp__steward__mail_search`, `mcp__steward__mail_send`), plus `memory`, `session_search`, `skill_manage`, `skill_view`, `skills_list`. **Differs from the docs**: the docs say `mcp_steward_<tool>`, and `skill_manage` is not in the docs' allowlist; it cannot be removed without dropping the whole `skills` toolset (staged by `skills.write_approval: true`). **Open — decide before M1.** |
+| Exact tool names the model sees (feed the T2.2 allowlist) | `mcp__steward__<tool>` (double underscores, e.g. `mcp__steward__files_read`, `mcp__steward__mail_search`, `mcp__steward__mail_send`), plus `memory`, `session_search`, `skill_manage`, `skill_view`, `skills_list`. The docs originally said `mcp_steward_<tool>`; renamed everywhere on 2026-10-02 (Names row). `skill_manage` is not in the docs' allowlist and cannot be removed without dropping the whole `skills` toolset (its writes are staged by `skills.write_approval: true`). **Open — decide before T2.2.** |
 | Request fields and text paths | Agent calls: `model`, `messages`, `tools`, `stream` (+ `reasoning_effort` injected by the proxy). The auxiliary call (session-title generation, one per new session, after the reply): `model`, `messages`, `response_format` (strict JSON schema), `stream`, no `tools`. All message `content` values are strings. Text lives in `messages[].content` (system, user, assistant, tool) and `messages[].tool_calls[].function.arguments`; `tools[]` and `response_format` carry only schemas. Message keys seen: `role`, `content`, `tool_calls`, `tool_call_id`. |
 | Non-streaming | `model.streaming: false` works: 240/240 recorded requests had `stream: false`. |
 | Session continuity | The same `X-Hermes-Session-Id` reloads history: turn 2 recalled turn 1, and turn 2's request carried `system, user, assistant, user`. |

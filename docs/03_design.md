@@ -220,7 +220,7 @@ Behaviour:
 - Save is disabled when nothing changed or the section is over the limit. Reject an entry containing a line that is only `§`.
 - Footer note: "Changes apply from your next new chat".
 
-**ActivityRail items** (`activity-rail.tsx`): one row per `audit_events` item, with a Lucide icon, `summary` and the time. The UI shows the `summary` written by steward-api and strips the `mcp_steward_` prefix from tool names.
+**ActivityRail items** (`activity-rail.tsx`): one row per `audit_events` item, with a Lucide icon, `summary` and the time. The UI shows the `summary` written by steward-api and strips the `mcp__steward__` prefix from tool names.
 
 | `kind` | What it shows | Treatment | Click |
 |---|---|---|---|

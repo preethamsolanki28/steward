@@ -264,7 +264,7 @@ Should-haves TS1–TS5 start only after the M3 Done-when is met AND Day 9 (Oct 1
 - **No LLM call bypasses the Shield.** The proxy pipeline (docs/02 §7a steps 1–10) runs on every `/v1/chat/completions`:
   1. Check the Bearer `STEWARD_PROXY_KEY`.
   2. Reject `stream:true`. Any other `/v1/*` path returns 404 and writes a blocked ledger row.
-  3. Enforce the tool allowlist: the 9 `mcp_steward_*` tools plus `memory`, `session_search`, `skill_view` and `skills_list` (exact names recorded in T0.4).
+  3. Enforce the tool allowlist: the 9 `mcp__steward__*` tools plus `memory`, `session_search`, `skill_view` and `skills_list` (exact names recorded in T0.4).
   4. Ignore the requested model. Only the allowlisted Nemotron IDs leave.
   5. Neutralize placeholders (`[[`/`]]` → `⟦`/`⟧`).
   6. Pseudonymize every string leaf with `walk_strings`.
