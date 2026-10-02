@@ -257,7 +257,7 @@ How to tick:
     - 60 s per upstream attempt. At most 1 retry, only on 429/5xx, honoring x-ratelimit. Then walk the fallback chain once.
     - Malformed tool-call JSON, or empty content where a tool call was expected → retry once on `model_fallback` and record `escalated_from`.
   - `GET /v1/models` → `{data:[{id:'steward-auto', context_length:131072}]}`. Tests go in `tests/test_proxy.py`.
-- [ ] **T2.3** — Leak check (normalized matcher, ≥4-char aliases, secret values) + blocked-row masking + golden test on the recorded Hermes system prompt — E1 — 2.5h
+- [x] **T2.3** — Leak check (normalized matcher, ≥4-char aliases, secret values) + blocked-row masking + golden test on the recorded Hermes system prompt — E1 — 2.5h
   - What it scans: every outbound string leaf, for any vault value, any contact alias of ≥4 chars, and the literal values of `NEBIUS_API_KEY`, `TAVILY_API_KEY`, `SMTP_PASSWORD` and the `STEWARD_*` keys.
   - On a hit, the request is not sent:
     - `audit_events(kind='policy_block')`.
