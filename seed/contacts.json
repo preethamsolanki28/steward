@@ -1,0 +1,50 @@
+[
+  {
+    "name": "Rahul Verma",
+    "email": "rahul.verma@acme-logistics.example",
+    "org": "Acme Logistics",
+    "trusted": 1
+  },
+  {
+    "name": "Dr. Anita Shah",
+    "email": "anita.shah@brightleaf-clinics.example",
+    "org": "Brightleaf Clinics",
+    "trusted": 1
+  },
+  {
+    "name": "Li Wei",
+    "email": "li.wei@kestrel-robotics.example",
+    "org": "Kestrel Robotics",
+    "trusted": 1
+  },
+  {
+    "name": "Tom Becker",
+    "email": "tom.becker@juniper-co.example",
+    "org": "Juniper & Co",
+    "trusted": 1
+  },
+  {
+    "name": "Sara Khan",
+    "email": "sara.khan@orbitra-foods.example",
+    "org": "Orbitra Foods",
+    "trusted": 1
+  },
+  {
+    "name": "Maya Rao",
+    "email": "maya@rao-consulting.example",
+    "org": null,
+    "trusted": 0
+  },
+  {
+    "name": "Priya Nair",
+    "email": "priya.nair@nair-ca.example",
+    "org": null,
+    "trusted": 0
+  },
+  {
+    "name": "Karan Joshi",
+    "email": "karan.joshi@workloft-blr.example",
+    "org": null,
+    "trusted": 0
+  }
+]

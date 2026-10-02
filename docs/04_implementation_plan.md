@@ -134,7 +134,7 @@ How to tick:
     - `components/app-shell.tsx`: a left sidebar at ≥768px with Chat, Approvals (Badge = pending count), Ledger, and Memory & Skills, plus the health pill in the footer.
     - Below 768px: a top bar with a menu button that opens the same nav in a Sheet.
   - In dev, `pnpm dev` runs on the host and rewrites `/api/*` to 127.0.0.1:8787 (`STEWARD_DEV=1` allows Host localhost:3000). The build output `web/out` is served by steward-api.
-- [ ] **T0.6** — Seed dataset per docs/03 §11 (Demo and seed data plan) (identifier-free file names, watch topics, GSTIN/UPI invoice, BEC email with injected line, `\n§\n` memories) — E2 — 3h
+- [x] **T0.6** — Seed dataset per docs/03 §11 (Demo and seed data plan) (identifier-free file names, watch topics, GSTIN/UPI invoice, BEC email with injected line, `\n§\n` memories) — E2 — 3h
   - `seed/contacts.json` holds 8 contacts: 5 trusted client contacts + Maya (`maya@rao-consulting.example`) + 2 others. The clients:
     - Acme Logistics (Rahul Verma, CFO, `rahul.verma@acme-logistics.example`)
     - Brightleaf Clinics (Dr. Anita Shah)
