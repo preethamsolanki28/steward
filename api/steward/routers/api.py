@@ -3,7 +3,7 @@
 import re
 import sqlite3
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import anyio
 import httpx
@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from steward import db, hermes_client, jobs, memory_watch
 from steward import health as health_probe
 from steward.config import get_settings
+from steward.seed import atomic_write
 
 router = APIRouter(prefix="/api")
 
@@ -233,4 +234,58 @@ async def run_morning_brief(request: Request) -> JSONResponse:
         return JSONResponse(
             status_code=502, content={"detail": f"Hermes refused the run (HTTP {r.status_code})"}
         )
+    return JSONResponse({"ok": True})
+
+
+# --- memory (T1.8) -----------------------------------------------------------------------------
+
+MEMORY_FILES = {"memory": ("MEMORY.md", 2200), "user": ("USER.md", 1375)}
+ENTRY_DELIMITER = "\n§\n"
+
+
+def _read_entries(name: str) -> list[str]:
+    path = get_settings().memories_dir / name
+    raw = path.read_text(encoding="utf-8") if path.exists() else ""
+    return [e for e in (x.strip() for x in raw.split(ENTRY_DELIMITER)) if e]
+
+
+def _joined_chars(entries: list[str]) -> int:
+    return len(ENTRY_DELIMITER.join(entries))  # str length = code points, as the UI counts
+
+
+@router.get("/memory")
+async def memory_get() -> dict[str, Any]:
+    def read() -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        for key, (name, limit) in MEMORY_FILES.items():
+            entries = _read_entries(name)
+            out[key] = {"entries": entries, "chars": _joined_chars(entries), "limit": limit}
+        return out
+
+    return await anyio.to_thread.run_sync(read)
+
+
+class MemoryPut(BaseModel):
+    file: Literal["memory", "user"]
+    entries: list[str]
+
+
+@router.put("/memory")
+async def memory_put(body: MemoryPut) -> JSONResponse:
+    name, limit = MEMORY_FILES[body.file]
+    entries = [e.strip() for e in body.entries if e.strip()]
+    for entry in entries:
+        if any(line.strip() == "§" for line in entry.splitlines()):
+            return JSONResponse(
+                status_code=400, content={"detail": "An entry cannot contain a line that is only §"}
+            )
+    chars = _joined_chars(entries)
+    if chars > limit:
+        return JSONResponse(
+            status_code=400,
+            content={"detail": f"Memory not saved — over the limit ({chars} > {limit})"},
+        )
+    target = get_settings().memories_dir / name
+    # Temp file + os.replace in the same directory; steward-api runs as UID 10000 like Hermes.
+    await anyio.to_thread.run_sync(atomic_write, target, ENTRY_DELIMITER.join(entries))
     return JSONResponse({"ok": True})

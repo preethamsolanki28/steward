@@ -223,7 +223,7 @@ How to tick:
 - [x] **T1.7** — `/api/briefs/latest` (+ job status), `/api/skills`, `POST /api/skills/morning-brief/run` — E2 — 1.5h
   - `/api/briefs/latest` returns `{brief, job: {last_run_at, last_status, next_run_at}}`, with the job status taken from Hermes `GET /api/jobs/{id}`.
   - `/api/skills` marks only morning-brief as runnable. The run endpoint records the manual trigger time (in memory, for the `skill_run` label) → Hermes `POST /api/jobs/{id}/run`.
-- [ ] **T1.8** — `/api/memory` GET/PUT (entry-aware, limits, atomic write as UID 10000) — E2 — 1.5h
+- [x] **T1.8** — `/api/memory` GET/PUT (entry-aware, limits, atomic write as UID 10000) — E2 — 1.5h
   - Entries are split and joined on `\n§\n`. Limits: memory 2,200 and user 1,375 chars; PUT returns 400 when the joined length exceeds the limit.
   - Writes use a temp file + `os.replace`.
 
@@ -449,9 +449,9 @@ Tick a box only after you have seen it pass yourself. Runtime items are checked 
 ### M1
 - [ ] `/api/chat "Chase the Acme invoice"` → agent calls files_read + mail_search and returns a draft
   - Check: `curl -s -X POST http://127.0.0.1:8787/api/chat -H 'Content-Type: application/json' -H 'X-Steward-Client: web' -d '{"message":"Chase the Acme invoice"}'`, then `curl -s 'http://127.0.0.1:8787/api/activity?after_id=0'` shows `tool_call` rows for files_read and mail_search.
-- [ ] `make brief-now` saves a brief containing a Tavily result
+- [x] `make brief-now` saves a brief containing a Tavily result
   - Check: `curl -s http://127.0.0.1:8787/api/briefs/latest`.
-- [ ] DG-2 path proven (learned memory applied in a new conversation, or a PUT /api/memory edit applied in the next new conversation)
+- [x] DG-2 path proven (learned memory applied in a new conversation, or a PUT /api/memory edit applied in the next new conversation)
 
 ### M2
 - [ ] `make leak-test` passes
