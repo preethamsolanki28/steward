@@ -197,7 +197,7 @@ How to tick:
   - Each tool call writes an `audit_events(kind='tool_call')` row. Tests go in `tests/test_mcp.py`.
   - `brief_save` also writes `audit_events(kind='skill_run', summary='morning-brief · scheduled run', ref_table='briefs', ref_id=<brief_id>)`. If `POST /api/skills/morning-brief/run` or `make brief-now` started the run within the last 10 minutes (steward-api records the trigger time in memory), the summary is 'morning-brief · run now' instead.
   - `mail_send` and `files_write` are added in T3.1.
-- [ ] **T1.4** — Hermes config template per docs/02 §2a (hermes config.yaml) + steward-api startup job registration (Jobs API, idempotent) + `make brief-now` — E1 — 2.5h
+- [x] **T1.4** — Hermes config template per docs/02 §2a (hermes config.yaml) + steward-api startup job registration (Jobs API, idempotent) + `make brief-now` — E1 — 2.5h
   - `make` renders `hermes/config.yaml.tmpl`:
     - `model: {provider: custom, base_url: http://steward-api:8787/v1, key_env: STEWARD_PROXY_KEY, default: steward-auto, context_length: 131072, streaming: false}`. Every `auxiliary.<task>` is pinned to the same provider and `steward-auto`.
     - `mcp_servers.steward` with url `http://steward-api:8787/mcp` and header `Authorization: "Bearer ${STEWARD_MCP_TOKEN}"`.
@@ -220,7 +220,7 @@ How to tick:
   - Writes `conversations` and `messages`; serves `GET /api/conversations` and `GET /api/conversations/{id}`.
   - `memory_watch.py` hashes MEMORY.md/USER.md before and after each turn. On a change it writes `audit_events(kind='memory_edit')` with a unified diff in `detail`.
   - `tests/test_reentrancy.py` proves the event loop isn't blocked while `/api/chat` waits on Hermes calling back into steward-api.
-- [ ] **T1.7** — `/api/briefs/latest` (+ job status), `/api/skills`, `POST /api/skills/morning-brief/run` — E2 — 1.5h
+- [x] **T1.7** — `/api/briefs/latest` (+ job status), `/api/skills`, `POST /api/skills/morning-brief/run` — E2 — 1.5h
   - `/api/briefs/latest` returns `{brief, job: {last_run_at, last_status, next_run_at}}`, with the job status taken from Hermes `GET /api/jobs/{id}`.
   - `/api/skills` marks only morning-brief as runnable. The run endpoint records the manual trigger time (in memory, for the `skill_run` label) → Hermes `POST /api/jobs/{id}/run`.
 - [ ] **T1.8** — `/api/memory` GET/PUT (entry-aware, limits, atomic write as UID 10000) — E2 — 1.5h
