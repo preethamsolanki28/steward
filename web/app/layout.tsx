@@ -1,12 +1,20 @@
 import type { Metadata } from "next";
-import { Geist } from "next/font/google";
+import { Inter, JetBrains_Mono } from "next/font/google";
 
 import { AppShell } from "@/components/app-shell";
-import { cn } from "@/lib/utils";
+import { Toaster } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import "./globals.css";
 
-// TODO(T0.7): replace Geist with Inter + JetBrains Mono via next/font (docs/03 §3).
-const geist = Geist({ subsets: ["latin"], variable: "--font-sans" });
+// next/font downloads the files at build time and serves them from /_next/static/media,
+// so the browser never calls Google (docs/03 §3).
+// latin-ext is needed for ₹ (U+20B9 is outside the latin subset).
+const inter = Inter({ subsets: ["latin", "latin-ext"], variable: "--font-inter", display: "swap" });
+const mono = JetBrains_Mono({
+  subsets: ["latin", "latin-ext"],
+  variable: "--font-jetbrains-mono",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: "Steward",
@@ -15,9 +23,12 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" className={cn("font-sans", geist.variable)}>
-      <body className="bg-background text-foreground antialiased">
-        <AppShell>{children}</AppShell>
+    <html lang="en" className={`${inter.variable} ${mono.variable}`}>
+      <body className="bg-background font-sans text-foreground antialiased">
+        <TooltipProvider>
+          <AppShell>{children}</AppShell>
+        </TooltipProvider>
+        <Toaster />
       </body>
     </html>
   );

@@ -126,7 +126,7 @@ How to tick:
 - [ ] **DG-2** — memory gate, in T0.4, by end of Day 2. Tell the agent a new preference 5×. PASS if `MEMORY.md`/`USER.md` actually changes in ≥4/5. Record the result in docs/02.
   - **PASS:** the demo shows a learned memory. Rahul's tone line is NOT seeded.
   - **FAIL:** the demo shows the user editing a memory entry in the dashboard, then a new chat applying it. M1 Done-when switches to the edit path.
-- [ ] **T0.5** — Next.js 15 static-export scaffold + shadcn/ui + app shell (sidebar, mobile Sheet nav), 4 routes, dev rewrite to :8787 — E2 — 3h
+- [x] **T0.5** — Next.js 15 static-export scaffold + shadcn/ui + app shell (sidebar, mobile Sheet nav), 4 routes, dev rewrite to :8787 — E2 — 3h
   - Stack: Next.js 15 App Router with `output: 'export'`, React 19, TypeScript strict, Tailwind CSS, shadcn/ui, lucide-react, sonner. Use pnpm and set `NEXT_TELEMETRY_DISABLED=1`.
   - All data fetching is client-side (`'use client'`).
   - Routes: `/chat`, `/approvals`, `/ledger`, `/memory`. Default route `/` → `/chat`.
@@ -152,7 +152,7 @@ How to tick:
     - `USER.md`: "Maya prefers concise, friendly emails and signs off 'Best, Maya'".
     - `MEMORY.md`: general entries only. Rahul's tone preference is NOT seeded when DG-2 passes.
   - All data is synthetic and uses `.example` domains.
-- [ ] **T0.7** — Design tokens + fonts + listed shadcn components — E2 — 1.5h
+- [x] **T0.7** — Design tokens + fonts + listed shadcn components — E2 — 1.5h
   - Colours:
     - Primary Teal 700 `#0F766E` (hover `#115E59`); warning Amber 600 `#D97706`; danger Red 700 `#B91C1C`; success Green 700 `#15803D`.
     - Background `#FAFAF9`; card `#FFFFFF`; text `#1C1917`; muted `#78716C`; border `#E7E5E4`.
