@@ -1,0 +1,29 @@
+# Secrets: .env holds every key. Never commit it.
+.env
+.env.*
+!.env.example
+
+# Runtime state (steward.db, Hermes files, workspace copy). Anchored to the repo
+# root so seed/workspace/ stays tracked.
+/data/
+/workspace/
+
+# Build output and dependencies
+web/out/
+web/.next/
+web/node_modules/
+api/.venv/
+
+# Tool caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Demo recordings are never committed
+*.mov
+*.mp4
+*.webm
+
+# OS
+.DS_Store

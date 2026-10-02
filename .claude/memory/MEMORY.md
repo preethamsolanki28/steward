@@ -1,0 +1,2 @@
+- [Steward hackathon project](steward-hackathon-project.md) — Nebius x NVIDIA Personal AI entry; deadline Oct 30 2026; docs/ + AGENTS.md are source of truth
+- [Team and hardware](team-and-hardware.md) — 2 AI engineers, Macs only (M1 Pro 16GB, M4 Pro 24GB); wants brutally honest feedback

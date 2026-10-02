@@ -1,0 +1,94 @@
+# Steward: exactly two services (docs/02 §2a).
+# - steward-api is on `internal` and `egress`; it is the only service that reaches the internet.
+# - hermes is only on `internal` (internal: true), so steward-api is the only host it can reach.
+# Host publishes are 127.0.0.1 only. Hermes 8642 is never published.
+name: steward
+
+services:
+  steward-api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    restart: unless-stopped
+    environment:
+      NEBIUS_API_KEY: ${NEBIUS_API_KEY:-}
+      TOKEN_FACTORY_BASE_URL: ${TOKEN_FACTORY_BASE_URL:-https://api.tokenfactory.nebius.com/v1}
+      MODEL_PRIMARY: ${MODEL_PRIMARY:-nvidia/Nemotron-3_5-Lightning}
+      MODEL_FALLBACK: ${MODEL_FALLBACK:-nvidia/nemotron-3-super-120b-a12b}
+      MODEL_FALLBACK_2: ${MODEL_FALLBACK_2:-nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B}
+      REASONING_EFFORT: ${REASONING_EFFORT:-}
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+      MAIL_MODE: ${MAIL_MODE:-demo}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      DEMO_MAIL_REDIRECT: ${DEMO_MAIL_REDIRECT:-}
+      OWNER_EMAIL: ${OWNER_EMAIL:-maya@rao-consulting.example}
+      STEWARD_PROXY_KEY: ${STEWARD_PROXY_KEY:-}
+      STEWARD_MCP_TOKEN: ${STEWARD_MCP_TOKEN:-}
+      HERMES_API_URL: ${HERMES_API_URL:-http://hermes:8642}
+      HERMES_API_KEY: ${HERMES_API_KEY:-}
+      STEWARD_DB_PATH: ${STEWARD_DB_PATH:-/data/steward.db}
+      HERMES_DATA_DIR: ${HERMES_DATA_DIR:-/hermes-data}
+      WORKSPACE_DIR: ${WORKSPACE_DIR:-/workspace}
+      STEWARD_DEMO: ${STEWARD_DEMO:-0}
+      STEWARD_DEV: ${STEWARD_DEV:-0}
+      DAILY_REQUEST_CAP: ${DAILY_REQUEST_CAP:-0}
+    ports:
+      - "127.0.0.1:8787:8787"
+    volumes:
+      - ./data:/data
+      - ./data/hermes:/hermes-data
+      - ./workspace:/workspace
+      - ./skills:/opt/steward-skills:ro
+    networks:
+      - internal
+      - egress
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/api/health', timeout=4)"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  hermes:
+    # Hermes Agent v2026.9.24, pinned by the multi-arch index digest. Never run `hermes update`.
+    image: nousresearch/hermes-agent:v2026.9.24@sha256:fca358f12efd65bfaaca05884166f15c0e2788375ca30d77061ac1ebc96452b7
+    command: ["gateway", "run"]
+    restart: unless-stopped
+    environment:
+      # Only these secrets reach hermes (AGENTS.md "Secrets and logging").
+      API_SERVER_ENABLED: ${API_SERVER_ENABLED:-true}
+      API_SERVER_HOST: ${API_SERVER_HOST:-0.0.0.0}
+      API_SERVER_KEY: ${HERMES_API_KEY:-}
+      STEWARD_PROXY_KEY: ${STEWARD_PROXY_KEY:-}
+      STEWARD_MCP_TOKEN: ${STEWARD_MCP_TOKEN:-}
+      HERMES_TIMEZONE: ${HERMES_TIMEZONE:-Asia/Kolkata}
+      HERMES_UID: ${HERMES_UID:-10000}
+      HERMES_GID: ${HERMES_GID:-10000}
+    volumes:
+      - ./data/hermes:/opt/data
+      - ./skills:/opt/steward-skills:ro
+    networks:
+      - internal
+    depends_on:
+      steward-api:
+        condition: service_healthy
+    healthcheck:
+      # GET /health on the API server is unauthenticated (gateway/platforms/api_server.py).
+      # T0.4 records this endpoint in docs/02.
+      test: ["CMD", "curl", "-fsS", "--max-time", "5", "-o", "/dev/null", "http://127.0.0.1:8642/health"]
+      interval: 15s
+      timeout: 8s
+      retries: 5
+      start_period: 90s
+
+networks:
+  internal:
+    internal: true
+  egress: {}

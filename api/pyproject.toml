@@ -1,0 +1,36 @@
+[project]
+name = "steward-api"
+version = "0.1.0"
+description = "Steward control plane, Privacy Shield proxy and MCP tools"
+license = "MIT"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi>=0.142",
+    "uvicorn>=0.54",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28",
+    "pyright>=1.1.414",
+    "pytest>=9.1",
+    "ruff>=0.16",
+]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "ASYNC"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]
+
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

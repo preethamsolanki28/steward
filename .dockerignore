@@ -1,0 +1,20 @@
+# The steward-api build context is the repo root. Keep secrets, runtime state
+# and local tool output out of it.
+.git
+.env
+.env.*
+!.env.example
+data/
+workspace/
+.claude/
+web/node_modules/
+web/.next/
+web/out/
+api/.venv/
+**/__pycache__/
+**/.pytest_cache/
+**/.ruff_cache/
+**/.DS_Store
+*.mov
+*.mp4
+*.webm

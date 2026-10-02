@@ -1,0 +1,17 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # T0.1 placeholder so the workflow exists from day 1 (docs/04 §4 M3 note).
+  # TODO(T3.5): add the pytest job (uv sync + uv run pytest).
+  # TODO(T5.7): add ruff, pyright, pnpm build, and compose up + /api/health.
+  compose-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate docker-compose.yml
+        run: cp .env.example .env && docker compose config --quiet

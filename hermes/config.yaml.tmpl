@@ -1,0 +1,41 @@
+# Steward: Hermes Agent config template (docs/02 §2a).
+# `make up` / `make demo-reset` render this to data/hermes/config.yaml
+# (= /opt/data/config.yaml in the hermes container). Hermes expands ${VAR}
+# placeholders itself from its container environment, so no secret is
+# written into the rendered file.
+#
+# Hermes boundary (docs/02 §4 rule 11): touch Hermes only through this file,
+# the API server, MCP, memories/*.md and the external skills dir.
+
+# Every model call goes to the steward-api Privacy Shield proxy. Hermes always
+# requests the alias steward-auto; the proxy picks the real Nemotron ID (D3).
+model:
+  provider: custom
+  base_url: http://steward-api:8787/v1
+  key_env: STEWARD_PROXY_KEY
+  default: steward-auto
+  context_length: 131072
+  streaming: false
+
+# Toolset lockdown. Explicit platform lists act as an allowlist and
+# agent.disabled_toolsets is applied last. T0.4 records the exact tool names
+# the model sees (they feed the proxy allowlist in T2.2).
+platform_toolsets:
+  api_server: [memory, session_search, skills, steward]
+  cron: [memory, skills, steward]
+
+agent:
+  disabled_toolsets: [web, browser, terminal, file, code_execution, delegation]
+
+# Only our two skills load: repo skills/ is mounted read-only here, and
+# /opt/data/.no-bundled-skills exists before first boot (make init).
+skills:
+  external_dirs: [/opt/steward-skills]
+  write_approval: true
+
+memory:
+  write_approval: false
+
+# TODO(T0.3): mcp_servers.steward -> url http://steward-api:8787/mcp,
+#             headers Authorization: "Bearer ${STEWARD_MCP_TOKEN}".
+# TODO(T1.4): pin every auxiliary.<task> to this custom provider and steward-auto.
