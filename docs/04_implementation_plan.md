@@ -92,7 +92,7 @@ How to tick:
   - Verify with `curl -s https://api.tokenfactory.nebius.com/v1/models -H "Authorization: Bearer $NEBIUS_API_KEY"`. The response must list `nvidia/Nemotron-3_5-Lightning`, `nvidia/nemotron-3-super-120b-a12b` and `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B` (IDs are case-sensitive). Use the global URL only.
   - The demo Gmail App Password goes into `SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASSWORD`. It is used only when `DEMO_MAIL_REDIRECT` is set.
   - `docs/feedback_log.md` gets a dated one-liner for every Nebius/NVIDIA/Hermes friction. It feeds T5.5.
-- [ ] **T0.3** — RISKIEST-ASSUMPTION TEST + **DG-1**: minimal passthrough proxy, `steward` stub MCP, own Acme fixture, scorer, 40 runs, record a real Token Factory response fixture for tests — E1 — 7h
+- [x] **T0.3** — RISKIEST-ASSUMPTION TEST + **DG-1**: minimal passthrough proxy, `steward` stub MCP, own Acme fixture, scorer, 40 runs, record a real Token Factory response fixture for tests — E1 — 7h
   - The chain:
     - Hermes, pinned image.
     - A minimal passthrough proxy that verifies the key, injects `reasoning_effort`, forwards to Token Factory and records the request and response.
@@ -101,7 +101,7 @@ How to tick:
   - Run the invoice-chase prompt 10× for each of {Lightning, Super} × {plain fixture, hand-pseudonymized fixture} = 40 runs.
   - The automated scorer lives in `api/tests/harness_t03.py`. Per run it records: tool order and JSON-arg validity, placeholder integrity in the draft, end-to-end turn latency, and tokens.
   - Save one real Token Factory response as a test fixture. The passthrough proxy carries into T1.1.
-- [ ] **DG-1** — decision gate, end of Day 2. PASS if, for at least one model:
+- [x] **DG-1** — decision gate, end of Day 2. PASS if, for at least one model:
   - ≥8/10 runs call the right tools in order with valid JSON args;
   - ≥95% of placeholders come back intact in the draft;
   - p50 end-to-end turn latency is ≤45 s.
@@ -112,7 +112,7 @@ How to tick:
     2. Cut the toolset per skill.
     3. Accept Super at p50 ≤60 s.
     4. **Plan B.** Replace Hermes's loop with a thin custom tool loop in steward-api (OpenAI SDK). It keeps the MCP tools, memory files, Shield and Gate, and runs the 08:00 brief from a simple asyncio timer instead of Hermes cron. It costs about 3 days. Pre-agreed cuts: conversation list, skills "Run now"/schedule detail, ledger stats, 375px pass.
-- [ ] **T0.4** — Hermes integration probe + **DG-2**: apply toolset lockdown and record exact tool names + request fields/paths (incl. auxiliary calls) per user turn; `model.streaming:false`; `X-Hermes-Session-Id` continuity + fresh snapshot on new session; memory-tool write reliability (DG-2); Jobs API create/run/one-shot + missed-run behaviour; healthcheck endpoint; `make egress-check` fails as expected; external skills dir + no-bundled marker; 400 policy-block surfacing without retry; pin image digest — E1 — 4h
+- [x] **T0.4** — Hermes integration probe + **DG-2**: apply toolset lockdown and record exact tool names + request fields/paths (incl. auxiliary calls) per user turn; `model.streaming:false`; `X-Hermes-Session-Id` continuity + fresh snapshot on new session; memory-tool write reliability (DG-2); Jobs API create/run/one-shot + missed-run behaviour; healthcheck endpoint; `make egress-check` fails as expected; external skills dir + no-bundled marker; 400 policy-block surfacing without retry; pin image digest — E1 — 4h
   - Lockdown:
     - `platform_toolsets: {api_server: [memory, session_search, skills, steward], cron: [memory, skills, steward]}`
     - `agent.disabled_toolsets: [web, browser, terminal, file, code_execution, delegation]`
@@ -123,7 +123,7 @@ How to tick:
   - A 400 `steward_policy_block` is surfaced by Hermes without a retry.
   - Pin `nousresearch/hermes-agent` v2026.9.24 by digest and never run `hermes update`.
   - Record any probe item that can't be settled as an open item in docs/02. Do not guess it.
-- [ ] **DG-2** — memory gate, in T0.4, by end of Day 2. Tell the agent a new preference 5×. PASS if `MEMORY.md`/`USER.md` actually changes in ≥4/5. Record the result in docs/02.
+- [x] **DG-2** — memory gate, in T0.4, by end of Day 2. Tell the agent a new preference 5×. PASS if `MEMORY.md`/`USER.md` actually changes in ≥4/5. Record the result in docs/02.
   - **PASS:** the demo shows a learned memory. Rahul's tone line is NOT seeded.
   - **FAIL:** the demo shows the user editing a memory entry in the dashboard, then a new chat applying it. M1 Done-when switches to the edit path.
 - [x] **T0.5** — Next.js 15 static-export scaffold + shadcn/ui + app shell (sidebar, mobile Sheet nav), 4 routes, dev rewrite to :8787 — E2 — 3h
@@ -441,10 +441,10 @@ How to tick:
 Tick a box only after you have seen it pass yourself. Runtime items are checked on a fresh `make demo-reset && make up`; CI items on the GitHub Actions run.
 
 ### M0
-- [ ] DG-1 + DG-2 decisions and numbers are in docs/02
-- [ ] `make up` → `docker compose ps` shows steward-api and hermes healthy
-- [ ] `make egress-check` shows Hermes cannot reach example.com
-- [ ] web shell renders 4 routes at desktop and 375px
+- [x] DG-1 + DG-2 decisions and numbers are in docs/02
+- [x] `make up` → `docker compose ps` shows steward-api and hermes healthy
+- [x] `make egress-check` shows Hermes cannot reach example.com
+- [x] web shell renders 4 routes at desktop and 375px
 
 ### M1
 - [ ] `/api/chat "Chase the Acme invoice"` → agent calls files_read + mail_search and returns a draft

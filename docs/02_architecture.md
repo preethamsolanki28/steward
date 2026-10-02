@@ -690,23 +690,61 @@ Hermes never receives `NEBIUS_API_KEY`, `TAVILY_API_KEY` or SMTP credentials.
 | D18  | Static-exported Next.js served by FastAPI (2 containers, same origin, no CORS)                                                                                                                                                                                        | Next server; a separate web container (cut)                                                                               | Avoid a third container, CORS and build-time URLs                                                                                              |
 | D19  | Cron via Hermes Jobs API registered by steward-api at startup (idempotent), `HERMES_TIMEZONE=Asia/Kolkata`                                                                                                                                                           | Own scheduler (only under Plan B: asyncio timer)                                                                          | Uses Hermes's cron; schedule and "Run now" share one path                                                                                      |
 | D20  | `mcp==2.2.0` MCPServer mounted at root with DNS-rebinding allowed hosts + bearer middleware                                                                                                                                                                         | SDK auth (OAuth-only). Kept as fallback, not chosen: pin `mcp<2` + FastMCP if T1.3 finds 2.x unusable                    | Endpoint exactly `/mcp`; static bearer enforced by our ASGI middleware                                                                        |
-| DG-1 | **DG-1 result (fill on Day 2):** PASS/FAIL ____; primary model ____; fallback ____; `reasoning_effort` ____; fail-ladder step taken ____                                                                                                                      |                                                                                                                           | Numbers in the DG-1 table below                                                                                                                |
-| DG-2 | **DG-2 result (fill on Day 2):** PASS/FAIL ____ (__/5); demo path: learned memory / dashboard edit                                                                                                                                                              |                                                                                                                           | Attempts in the DG-2 table below                                                                                                               |
-| Pin  | **Hermes image digest (fill in T0.4):** `nousresearch/hermes-agent@sha256:____` (v2026.9.24)                                                                                                                                                                  |                                                                                                                           | Rule 9                                                                                                                                         |
+| DG-1 | **DG-1 result (2026-10-02, T0.3, 40 runs):** PASS; primary model `nvidia/Nemotron-3_5-Lightning`; fallback `nvidia/nemotron-3-super-120b-a12b` (2nd fallback `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B`, unchanged); `reasoning_effort` `low`; fail-ladder step taken: none | | Numbers in the DG-1 table below |
+| DG-2 | **DG-2 result (2026-10-02, T0.4):** FAIL (3/5); demo path: dashboard edit (Memory & Skills → add entry → Save → New chat). Rahul's tone line stays unseeded. | | Attempts in the DG-2 table below |
+| Pin  | **Hermes image digest (T0.4):** `nousresearch/hermes-agent@sha256:fca358f12efd65bfaaca05884166f15c0e2788375ca30d77061ac1ebc96452b7` (v2026.9.24, multi-arch index: amd64 `sha256:2fd023efbb8d…`, arm64 `sha256:93b4e2877a2f…`); pinned in docker-compose.yml | | Rule 9 |
 
-**DG-1 results (fill on Day 2; later copied to the README and the video):**
+**DG-1 results (measured 2026-10-02 with `api/tests/harness_t03.py`, `reasoning_effort=low`; copy to the README and the video):**
 
 | Model                                 | Fixture       | Tool-order success (of 10) | Placeholder integrity | p50 latency | Tokens |
 | ------------------------------------- | ------------- | -------------------------- | --------------------- | ----------- | ------ |
-| `nvidia/Nemotron-3_5-Lightning`     | plain         |                            |                       |             |        |
-| `nvidia/Nemotron-3_5-Lightning`     | pseudonymized |                            |                       |             |        |
-| `nvidia/nemotron-3-super-120b-a12b` | plain         |                            |                       |             |        |
-| `nvidia/nemotron-3-super-120b-a12b` | pseudonymized |                            |                       |             |        |
+| `nvidia/Nemotron-3_5-Lightning`     | plain         | 10/10                      | n/a                   | 6.9 s       | 30,696 per run |
+| `nvidia/Nemotron-3_5-Lightning`     | pseudonymized | 10/10                      | 100.0% (59/59)        | 8.2 s       | 30,403 per run |
+| `nvidia/nemotron-3-super-120b-a12b` | plain         | 10/10                      | n/a                   | 7.2 s       | 27,971 per run |
+| `nvidia/nemotron-3-super-120b-a12b` | pseudonymized | 5/10                       | 100.0% (86/86)        | 7.2 s       | 28,013 per run |
 
-Placeholder integrity applies to the pseudonymized rows. Record the `reasoning_effort` used: ____
+Placeholder integrity applies to the pseudonymized rows. Record the `reasoning_effort` used: `low`
 
-**DG-2 attempts (fill on Day 2):**
+How it was measured (T0.3):
+- Chain: Hermes v2026.9.24 (pinned digest) → T0.3 passthrough proxy (key check, `steward-auto` → model ID, `reasoning_effort` injected, upstream `stream:false`, request/response recorded) → `https://api.tokenfactory.nebius.com/v1`; stub `steward` MCP server with `files_read`, `mail_search`, `mail_send` over the self-contained Acme fixture (`api/steward/t03_fixture.py`: INV-0042, 2 emails, 2 contacts). Each run is a new Hermes session. No skills were loaded yet, so the prompt carries the invoice-chase steps.
+- Success = Hermes 200 with no upstream error, `files_read` and `mail_search` executed before exactly one `mail_send`, and every model tool call's arguments are JSON objects that match the tool schema. The gate is applied to the pseudonymized row (the production path); the plain row is the control.
+- Super's 5 failures are all the same schema error: `mail_send` called with `"to": "[[EMAIL_1]]"` (a string, not a list). Hermes/MCP coerced it, so the queued send still went to the right recipient. Counting only "parses as JSON", all four rows are 10/10. All 40 runs addressed the correct recipient.
+- Latency = wall time of one `POST /v1/chat/completions` to Hermes (max 11.0 s, Lightning pseudonymized). Tokens = prompt + completion summed over all calls in a run, including one auxiliary call per turn (session-title generation, after Hermes replies). Lightning used 37,642–40,347 completion tokens per 10 runs (mostly reasoning) vs 8,539–8,772 for Super.
+- Estimated cost of all 40 runs: $0.23 (Lightning $0.026 per 10 runs, Super $0.089 per 10 runs). Raw results: `data/t03/results-20261002-130644.json` (local); one recorded run is committed under `api/tests/fixtures/recorded/`.
+- Model order (D3) stays Lightning → Super → Nano 30B: only Lightning meets every DG-1 criterion on the pseudonymized fixture.
+
+**DG-2 attempts (measured 2026-10-02 with `api/tests/probe_t04.py`, Lightning, `reasoning_effort=low`, memories seeded from `seed/memories/`, each attempt a new session):**
 
 | Attempt                   | 1 | 2 | 3 | 4 | 5 |
 | ------------------------- | - | - | - | - | - |
-| Memory file changed (y/n) |   |   |   |   |   |
+| Memory file changed (y/n) | y | y | n | n | y |
+
+- 1 "Rahul at Acme likes short, formal emails" and 2 "Dr. Shah … calls before 11 am IST": saved to `USER.md` via `memory`.
+- 3 "Li Wei … weekly status update every Friday": no tool call, but the reply claimed "Noted. I'll add…".
+- 4 "Tom Becker … invoices as PDF attachments": read files 4×, no memory write, reply "Noted.".
+- 5 "Sara Khan … every quote in INR": saved to `MEMORY.md` via `memory`, and also staged a `skill_manage` edit (held in `pending/skills/` by `skills.write_approval: true`); one call used a non-existent unprefixed `mail_search` tool.
+- Likely cause: Hermes' built-in system prompt says "Skills come first … Memory is the narrow exception for facts that apply to EVERY session", so per-client preferences are not reliably saved to memory.
+- Consequence (docs/04 DG-2 FAIL): the demo uses the dashboard edit path, and the M1 Done-when is "a `PUT /api/memory` edit is applied in the next new conversation". T0.4 verified the mechanism: a memory-file edit appears in a new session's system prompt and not in an already-running session.
+
+### T0.4 probe results (2026-10-02, Hermes v2026.9.24)
+
+Evidence: `data/t03/recordings/` (local) and `api/tests/fixtures/recorded/`. Config changes made to settle these are in `hermes/config.yaml.tmpl`.
+
+| Probe item | Result |
+| --- | --- |
+| Config path | `/opt/data/config.yaml` is read. Hermes rewrites it on every boot (adds `_config_version: 46`, backups in `/opt/data/backups/config/`); harmless because `make up` re-renders it. |
+| Toolset lockdown | `platform_toolsets` + `agent.disabled_toolsets` work. v2026.9.24 also needs `tools.tool_search.enabled: "off"`: by default MCP tools are hidden behind three bridge tools (`tool_search`, `tool_describe`, `tool_call`) and `session_search` is deferred. And `mcp_servers.steward.tools: {resources: false, prompts: false}`, otherwise Hermes adds `mcp__steward__{list_resources,read_resource,list_prompts,get_prompt}`. |
+| Exact tool names the model sees (feed the T2.2 allowlist) | `mcp__steward__<tool>` (double underscores, e.g. `mcp__steward__files_read`, `mcp__steward__mail_search`, `mcp__steward__mail_send`), plus `memory`, `session_search`, `skill_manage`, `skill_view`, `skills_list`. **Differs from the docs**: the docs say `mcp_steward_<tool>`, and `skill_manage` is not in the docs' allowlist; it cannot be removed without dropping the whole `skills` toolset (staged by `skills.write_approval: true`). **Open — decide before M1.** |
+| Request fields and text paths | Agent calls: `model`, `messages`, `tools`, `stream` (+ `reasoning_effort` injected by the proxy). The auxiliary call (session-title generation, one per new session, after the reply): `model`, `messages`, `response_format` (strict JSON schema), `stream`, no `tools`. All message `content` values are strings. Text lives in `messages[].content` (system, user, assistant, tool) and `messages[].tool_calls[].function.arguments`; `tools[]` and `response_format` carry only schemas. Message keys seen: `role`, `content`, `tool_calls`, `tool_call_id`. |
+| Non-streaming | `model.streaming: false` works: 240/240 recorded requests had `stream: false`. |
+| Session continuity | The same `X-Hermes-Session-Id` reloads history: turn 2 recalled turn 1, and turn 2's request carried `system, user, assistant, user`. |
+| Fresh snapshot | A `MEMORY.md` edit is not in an existing session's next system prompt, but is in a new session's system prompt. |
+| Memory writes | DG-2 above (3/5). |
+| Jobs API | `GET/POST /api/jobs`, `GET /api/jobs/{id}`, `POST /api/jobs/{id}/run` work with Bearer `API_SERVER_KEY`. Responses: `{"jobs":[…]}` and `{"job":{…}}`; fields include `id`, `name`, `schedule{kind,expr}`, `state`, `next_run_at`, `last_run_at`, `last_status`, `last_error`, `repeat`, `deliver`. Times are in `+05:30` (`HERMES_TIMEZONE` works). One-shot `schedule: "in 1m"` (or an ISO timestamp) fired once ~15 s late (60 s ticker), then `state: completed`. Run-now executed within ~2 s and left `next_run_at` unchanged. |
+| Missed run | Gateway stopped across an 18:07 IST slot (`cron.catch_up_missed: true` default): on restart it fired once, late (18:09:09), then moved to the next day. Mac sleep itself was not tested; stopping the gateway is the stand-in. |
+| Healthcheck | `GET /health` on 8642, unauthenticated: `{"status":"ok","platform":"hermes-agent","version":…}`. Used by the compose healthcheck. |
+| Egress isolation | `make egress-check` PASS: steward-api reaches 1.1.1.1:80/443, hermes cannot (example.com does not resolve on the test network, so it is reported as inconclusive and skipped). |
+| External skills dir | `skills.external_dirs: [/opt/steward-skills]` loads skills present when the gateway starts; the mount is read-only for Hermes. The skills index is cached in memory, so adding or editing a SKILL.md needs `docker compose restart hermes`. |
+| No-bundled marker | `.no-bundled-skills` stops the bundled catalogue, but Hermes still seeds and always lists `hermes-agent` (its own manual; hard-coded "never disableable"). "Only our two skills load" is therefore not exactly true. **Open — wording.** |
+| 400 `steward_policy_block` | Surfaced without retry (exactly one proxy call). Hermes answers HTTP 200 with `finish_reason: "error"`, `hermes: {completed:false, failed:true, error:"HTTP 400: …"}` and the message in `content`. Upstream 401 is surfaced the same way; upstream 5xx was retried ~16× for over 5 minutes. **Affects T1.6 error mapping.** |
+| Image digest | Pinned (see Pin row). |
