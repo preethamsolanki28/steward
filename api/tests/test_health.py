@@ -14,5 +14,8 @@ def test_health_ok() -> None:
 
 
 def test_no_generated_docs_routes() -> None:
+    # Unknown paths fall through to the root-mounted /mcp guard (D20), so they get 401, never docs.
     for path in ("/docs", "/redoc", "/openapi.json"):
-        assert client.get(path).status_code == 404
+        response = client.get(path)
+        assert response.status_code in (401, 404)
+        assert "openapi" not in response.text.lower()

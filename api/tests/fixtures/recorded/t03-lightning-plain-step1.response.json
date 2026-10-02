@@ -1,0 +1,59 @@
+{
+  "id": "chatcmpl-483965ba",
+  "choices": [
+    {
+      "finish_reason": "tool_calls",
+      "index": 0,
+      "logprobs": null,
+      "message": {
+        "content": null,
+        "refusal": null,
+        "role": "assistant",
+        "annotations": null,
+        "audio": null,
+        "function_call": null,
+        "tool_calls": [
+          {
+            "id": "call_1f25b8db66494a6ebd0ea49f",
+            "function": {
+              "arguments": "{\"path\":\"invoices/INV-0042.md\"}",
+              "name": "mcp__steward__files_read"
+            },
+            "type": "function"
+          }
+        ],
+        "reasoning": "We need to read invoice INV-0042 from invoices/INV-0042.md. Then find latest email thread with client contact. Likely need to search mail with query maybe invoice number or client. We'll read invoice first.",
+        "reasoning_content": "We need to read invoice INV-0042 from invoices/INV-0042.md. Then find latest email thread with client contact. Likely need to search mail with query maybe invoice number or client. We'll read invoice first."
+      },
+      "stop_reason": null,
+      "token_ids": null
+    }
+  ],
+  "created": 1790946405,
+  "model": "nvidia/Nemotron-3_5-Lightning",
+  "object": "chat.completion",
+  "moderation": null,
+  "service_tier": null,
+  "system_fingerprint": null,
+  "usage": {
+    "completion_tokens": 96,
+    "prompt_tokens": 5971,
+    "total_tokens": 6067,
+    "completion_tokens_details": {
+      "accepted_prediction_tokens": null,
+      "audio_tokens": null,
+      "reasoning_tokens": 54,
+      "rejected_prediction_tokens": null
+    },
+    "prompt_tokens_details": {
+      "audio_tokens": null,
+      "cached_tokens": 2096
+    },
+    "prompt_cache_hit_tokens": 2096,
+    "prompt_cache_miss_tokens": 3875
+  },
+  "prompt_logprobs": null,
+  "prompt_token_ids": null,
+  "kv_transfer_params": null,
+  "ec_transfer_params": null
+}

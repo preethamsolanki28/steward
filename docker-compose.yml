@@ -16,7 +16,7 @@ services:
       MODEL_PRIMARY: ${MODEL_PRIMARY:-nvidia/Nemotron-3_5-Lightning}
       MODEL_FALLBACK: ${MODEL_FALLBACK:-nvidia/nemotron-3-super-120b-a12b}
       MODEL_FALLBACK_2: ${MODEL_FALLBACK_2:-nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B}
-      REASONING_EFFORT: ${REASONING_EFFORT:-}
+      REASONING_EFFORT: ${REASONING_EFFORT:-low}
       TAVILY_API_KEY: ${TAVILY_API_KEY:-}
       MAIL_MODE: ${MAIL_MODE:-demo}
       SMTP_HOST: ${SMTP_HOST:-}

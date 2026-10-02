@@ -6,12 +6,13 @@ license = "MIT"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "fastapi>=0.142",
+    "httpx>=0.28",
+    "mcp==2.2.0",
     "uvicorn>=0.54",
 ]
 
 [dependency-groups]
 dev = [
-    "httpx>=0.28",
     "pyright>=1.1.414",
     "pytest>=9.1",
     "ruff>=0.16",
@@ -28,7 +29,7 @@ line-length = 100
 select = ["E", "F", "W", "I", "B", "UP", "S", "ASYNC"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101"]
+"tests/**" = ["S101", "S105", "S106"]
 
 
 [tool.pytest.ini_options]

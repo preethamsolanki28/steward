@@ -27,6 +27,14 @@ platform_toolsets:
 agent:
   disabled_toolsets: [web, browser, terminal, file, code_execution, delegation]
 
+# T0.4 finding: v2026.9.24 defaults to progressive tool disclosure (tools.tool_search.enabled:
+# auto), which hides MCP tools behind three bridge tools (tool_search / tool_describe /
+# tool_call) and defers session_search. Off = the model sees mcp_steward_* and session_search
+# directly, as docs/02 §7a step 2 assumes.
+tools:
+  tool_search:
+    enabled: "off"
+
 # Only our two skills load: repo skills/ is mounted read-only here, and
 # /opt/data/.no-bundled-skills exists before first boot (make init).
 skills:
@@ -36,6 +44,17 @@ skills:
 memory:
   write_approval: false
 
-# TODO(T0.3): mcp_servers.steward -> url http://steward-api:8787/mcp,
-#             headers Authorization: "Bearer ${STEWARD_MCP_TOKEN}".
+# The steward MCP server (steward-tools in steward-api). The model sees its tools as
+# mcp_steward_<name>. Hermes fills ${STEWARD_MCP_TOKEN} from its container environment.
+mcp_servers:
+  steward:
+    url: http://steward-api:8787/mcp
+    headers:
+      Authorization: "Bearer ${STEWARD_MCP_TOKEN}"
+    # T0.4 finding: Hermes adds list/read_resource and list/get_prompt utility tools when the
+    # server advertises those capabilities (MCPServer does). Steward exposes tools only.
+    tools:
+      resources: false
+      prompts: false
+
 # TODO(T1.4): pin every auxiliary.<task> to this custom provider and steward-auto.
