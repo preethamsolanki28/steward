@@ -5,12 +5,12 @@ search: nothing is sent, an audit_events(kind='policy_block') row and an egress_
 status 'blocked' (offending spans as «BLOCKED:KIND») are written. Allowed queries are sent in
 clear to Tavily (topics only, Tavily's own retention) and logged as egress_events(channel='web').
 
-TODO(T2.1): M1 checks the contacts-derived aliases and EMAIL/MONEY patterns below; T2.1
-replaces `find_identifiers` with the full Shield detectors (vault values, all regex kinds).
+The check is the full Privacy Shield (T2.1): dictionary aliases + every regex detector, plus the
+leak checker's vault values, contact aliases (>= 4 chars) and secret env values. Any vault entity
+(incl. ORG, MONEY, DOMAIN) blocks the query.
 """
 
 import json
-import re
 import sqlite3
 import time
 from typing import Any
@@ -19,20 +19,13 @@ import httpx
 
 from steward import db
 from steward.config import get_settings
+from steward.shield import Shield
+from steward.shield.detectors import find_spans
 
 TAVILY_URL = "https://api.tavily.com/search"
 DESTINATION = "api.tavily.com"
 MAX_QUERY_CHARS = 120
 BLOCK_SUMMARY = "Blocked: identifier would have left the Mac"
-
-_LEGAL_SUFFIX = re.compile(
-    r"\s*(&\s*co\.?|and\s+co\.?|ltd\.?|llc|inc\.?|pvt\.?\s*ltd\.?|private limited"
-    r"|limited|corp\.?)$",
-    re.I,
-)
-_TITLE = re.compile(r"^(dr|mr|mrs|ms|prof)\.?\s+", re.I)
-_EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
-_MONEY = re.compile(r"(?:[$₹]|\bINR\s?|\bUSD\s?)\s?\d[\d,]*(?:\.\d+)?", re.I)
 
 
 class SearchBlocked(Exception):
@@ -43,52 +36,13 @@ class SearchFailed(Exception):
     pass
 
 
-def _aliases(conn: sqlite3.Connection) -> list[tuple[str, str]]:
-    """(alias, KIND) pairs from contacts, longest first. Aliases < 3 chars are skipped here."""
-    out: set[tuple[str, str]] = set()
-    for row in conn.execute("SELECT name, email, org FROM contacts"):
-        name = (row["name"] or "").strip()
-        if name:
-            out.add((name, "PERSON"))
-            bare = _TITLE.sub("", name)
-            parts = bare.split()
-            out.update((p, "PERSON") for p in parts)
-            if bare != name and parts:
-                out.add((f"{name.split()[0]} {parts[-1]}", "PERSON"))  # "Dr. Shah"
-        org = (row["org"] or "").strip()
-        if org:
-            out.add((org, "ORG"))
-            stripped = _LEGAL_SUFFIX.sub("", org).strip()
-            out.add((stripped, "ORG"))
-            first = stripped.split()[0] if stripped.split() else ""
-            if len(first) >= 4:
-                out.add((first, "ORG"))
-        email = (row["email"] or "").strip().lower()
-        if "@" in email:
-            local, domain = email.split("@", 1)
-            out.update({(email, "EMAIL"), (local, "EMAIL"), (domain, "DOMAIN")})
-            label = domain.rsplit(".", 1)[0]
-            out.update(
-                {
-                    (label, "DOMAIN"),
-                    (label.replace("-", " "), "DOMAIN"),
-                    (label.replace("-", ""), "DOMAIN"),
-                }
-            )
-    return sorted((a for a in out if len(a[0]) >= 3), key=lambda a: -len(a[0]))
-
-
 def find_identifiers(conn: sqlite3.Connection, query: str) -> list[tuple[int, int, str]]:
-    """Spans (start, end, KIND) of identifiers in the query."""
-    spans: list[tuple[int, int, str]] = []
-    folded = query.casefold()
-    for alias, kind in _aliases(conn):
-        pattern = r"(?<!\w)" + re.escape(alias.casefold()) + r"(?:'s|’s)?(?!\w)"
-        spans.extend((m.start(), m.end(), kind) for m in re.finditer(pattern, folded))
-    spans.extend((m.start(), m.end(), "EMAIL") for m in _EMAIL.finditer(query))
-    spans.extend((m.start(), m.end(), "MONEY") for m in _MONEY.finditer(query))
+    """Spans (start, end, KIND) of identifiers in the final query, using the full Shield."""
+    shield = Shield(conn)
+    spans = [(s.start, s.end, s.kind) for s in find_spans(query, shield.index)]
+    spans += [(h.start, h.end, h.kind) for h in shield.checker().scan(query)]
     merged: list[tuple[int, int, str]] = []
-    for start, end, kind in sorted(spans, key=lambda s: (s[0], -(s[1] - s[0]))):
+    for start, end, kind in sorted(spans, key=lambda x: (x[0], -(x[1] - x[0]))):
         if merged and start < merged[-1][1]:
             continue
         merged.append((start, end, kind))

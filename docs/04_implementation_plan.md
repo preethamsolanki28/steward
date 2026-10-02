@@ -229,7 +229,7 @@ How to tick:
 
 ### M2 — Privacy Shield + Egress Ledger (Day 4–7, 20.5h)
 
-- [ ] **T2.1** — Detectors + derived aliases + regex set (incl. Indian patterns, negative rules) + vault + `walk_strings` pseudonymize/re-identify + placeholder neutralization + tolerant matcher; golden tests ("Chase the Acme invoice" → 0 raw "Acme"; "Hi Rahul,", "Rahul's", "Dr. Shah", "acme-logistics", non-ASCII name inside tool args; INV-0042/ISO dates/"12 days" untouched) — E1 — 7h
+- [x] **T2.1** — Detectors + derived aliases + regex set (incl. Indian patterns, negative rules) + vault + `walk_strings` pseudonymize/re-identify + placeholder neutralization + tolerant matcher; golden tests ("Chase the Acme invoice" → 0 raw "Acme"; "Hi Rahul,", "Rahul's", "Dr. Shah", "acme-logistics", non-ASCII name inside tool args; INV-0042/ISO dates/"12 days" untouched) — E1 — 7h
   - Files: `shield/detectors.py`, `aliases.py`, `vault.py`, `walk.py`.
   - Neutralize inbound `[[`/`]]` → `⟦`/`⟧`.
   - `walk_strings`:
