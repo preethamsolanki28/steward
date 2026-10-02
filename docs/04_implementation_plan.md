@@ -181,7 +181,7 @@ How to tick:
 - [x] **T1.2** — Connectors: mail_demo (demo_mail) + smtp with DEMO_MAIL_REDIRECT + tests — E2 — 2.5h
   - `connectors/mail_demo.py` reads and writes `demo_mail` (folders inbox/sent).
   - `connectors/smtp.py` sends via smtplib in a thread, only when `DEMO_MAIL_REDIRECT` is set. It sends to that address with the subject prefix `[Steward demo → original@x.example]`. `MAIL_MODE=demo` is the only mode in the MVP.
-- [ ] **T1.3** — MCP server steward-tools (mcp 2.2.0 MCPServer mount, bearer middleware): mail_search, mail_read (+ header contact upsert), files_list, files_read (safe_path), contacts_lookup, web_search (Tavily + identifier guard), brief_save; untrusted wrapping; audit rows; tests — E1 — 6h
+- [x] **T1.3** — MCP server steward-tools (mcp 2.2.0 MCPServer mount, bearer middleware): mail_search, mail_read (+ header contact upsert), files_list, files_read (safe_path), contacts_lookup, web_search (Tavily + identifier guard), brief_save; untrusted wrapping; audit rows; tests — E1 — 6h
   - Server setup:
     - `mcp.server.mcpserver.MCPServer`. Verify the import first; the fallback pin is `mcp<2` with FastMCP.
     - `streamable_http_app(stateless_http=True, json_response=True, transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=True, allowed_hosts=['steward-api:*','127.0.0.1:*','localhost:*']))`.

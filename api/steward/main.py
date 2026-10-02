@@ -56,6 +56,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     mcp_guard.app = mcp_tools.build_mcp_app()
     async with httpx.AsyncClient() as http, mcp_tools.mcp_server.session_manager.run():
         app.state.http = http
+        mcp_tools.set_http_client(http)
         yield
 
 

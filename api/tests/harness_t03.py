@@ -1,5 +1,9 @@
 """T0.3 riskiest-assumption harness + DG-1 scorer (docs/04 T0.3, docs/02 §10).
 
+M0 artifact: it drove the T0.3 stub MCP server (retired in T1.3, which reads the seed data
+instead of the fixture). TODO(T2.5): adapt it to the real steward-tools before re-running DG-1
+through the full Shield.
+
 Runs the invoice-chase prompt N times (default 10) for each of {Lightning, Super} x {plain,
 pseudonymized} through the real chain: Hermes (pinned image) -> T0.3 passthrough proxy ->
 Nebius Token Factory, with the stub `steward` MCP server over the self-contained Acme fixture.
