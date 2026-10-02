@@ -72,8 +72,7 @@ lint:
 
 typecheck:
 	cd api && uv run pyright
-	@if [ -f web/package.json ]; then pnpm --dir web exec tsc --noEmit; \
-	else echo "typecheck: web/ is not scaffolded yet (T0.5); skipping web typecheck."; fi
+	pnpm --dir web exec tsc --noEmit
 
 ## build: build the steward-api image (its node:22 stage builds web/out once web/ exists)
 build: check-docker
