@@ -166,7 +166,7 @@ How to tick:
 
 ### M1 — Agent core: memory, skills, tools (Day 2–4, 26h)
 
-- [ ] **T1.1** — steward-api skeleton: app, config, schema bootstrap, `python -m steward.seed`, passthrough proxy carried over from T0.3, guards (Host + X-Steward-Client), logging rule (no bodies), async rules, static serving of web/out, `/api/health` — E1 — 4.5h
+- [x] **T1.1** — steward-api skeleton: app, config, schema bootstrap, `python -m steward.seed`, passthrough proxy carried over from T0.3, guards (Host + X-Steward-Client), logging rule (no bodies), async rules, static serving of web/out, `/api/health` — E1 — 4.5h
   - `main.py`, `config.py`, `db.py`: stdlib `sqlite3`, no ORM, no migrations. The tables are exactly as in docs/02: contacts, vault, egress_events, actions, audit_events, conversations, messages, briefs, demo_mail, settings.
   - `seed.py`:
     - Contacts, with trust set from the seed only. Inbox into `demo_mail`, and a copy of the workspace.

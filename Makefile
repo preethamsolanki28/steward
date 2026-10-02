@@ -22,9 +22,8 @@ logs: check-docker
 	$(COMPOSE) logs -f
 
 ## seed: load the synthetic seed from seed/ into steward-api
-seed:
-	@echo "TODO(T1.1): make seed runs 'python -m steward.seed' in steward-api once steward.seed exists." >&2
-	@exit 1
+seed: check-docker
+	$(COMPOSE) exec -T steward-api python -m steward.seed
 
 ## demo-reset: wipe Hermes state + steward.db, reseed (new reset_nonce), start
 demo-reset:
