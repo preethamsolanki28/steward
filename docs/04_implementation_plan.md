@@ -264,7 +264,7 @@ How to tick:
     - A ledger row with status 'blocked', with each offending span replaced by `«BLOCKED:KIND»`.
     - The proxy returns 400 `steward_policy_block`. Any Shield error also fails closed.
   - Golden test: the full recorded Hermes system prompt passes with 0 blocks. Tests go in `tests/test_leakcheck.py`.
-- [ ] **T2.4** — Ledger store, pricing, `/api/ledger`, `/api/ledger/{id}` (local views), `/api/ledger/stats` — E2 — 3h
+- [x] **T2.4** — Ledger store, pricing, `/api/ledger`, `/api/ledger/{id}` (local views), `/api/ledger/stats` — E2 — 3h
   - `ledger/store.py` writes `egress_events` with all fields listed in docs/02. Request and response bodies are never logged anywhere else.
   - Each `egress_events` insert also writes `audit_events(kind='egress', summary='<model display name> · N identifiers masked', ref_table='egress_events', ref_id=<id>)` (display names per docs/03 §6.3). Blocked rows write `audit_events(kind='policy_block', summary='Blocked: identifier would have left the Mac', ref_table='egress_events', ref_id=<id>)`. Covered in `tests/test_proxy.py`.
   - `ledger/pricing.py` uses $ per 1M in/out tokens: Lightning $0.06/$0.24, Super $0.30/$0.90, Nano 30B $0.06/$0.24.

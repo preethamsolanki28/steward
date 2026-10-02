@@ -1,13 +1,15 @@
 """Control plane /api/* (docs/02 §6). Called by the dashboard only; guarded by steward.guards."""
 
+import json
 import re
 import sqlite3
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal
 
 import anyio
 import httpx
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -15,6 +17,7 @@ from steward import db, hermes_client, jobs, memory_watch
 from steward import health as health_probe
 from steward.config import get_settings
 from steward.seed import atomic_write
+from steward.shield import Shield
 
 router = APIRouter(prefix="/api")
 
@@ -289,3 +292,111 @@ async def memory_put(body: MemoryPut) -> JSONResponse:
     # Temp file + os.replace in the same directory; steward-api runs as UID 10000 like Hermes.
     await anyio.to_thread.run_sync(atomic_write, target, ENTRY_DELIMITER.join(entries))
     return JSONResponse({"ok": True})
+
+
+# --- ledger (T2.4) -----------------------------------------------------------------------------
+
+LEDGER_FIELDS = (
+    "id",
+    "ts",
+    "channel",
+    "destination",
+    "model",
+    "escalated_from",
+    "entities_masked",
+    "latency_ms",
+    "cost_usd",
+    "status",
+)
+IST = timezone(timedelta(hours=5, minutes=30))
+
+
+@router.get("/ledger")
+async def ledger(
+    channel: Literal["llm", "web", "mail"] | None = None, limit: int = Query(50, ge=1, le=500)
+) -> list[dict[str, Any]]:
+    cols = ", ".join(LEDGER_FIELDS)
+
+    def load(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+        if channel:
+            cur = conn.execute(
+                f"SELECT {cols} FROM egress_events WHERE channel = ? "  # noqa: S608
+                "ORDER BY id DESC LIMIT ?",
+                (channel, limit),
+            )
+        else:
+            cur = conn.execute(
+                f"SELECT {cols} FROM egress_events ORDER BY id DESC LIMIT ?",  # noqa: S608
+                (limit,),
+            )
+        return db.rows(cur)
+
+    return await db.run(load)
+
+
+@router.get("/ledger/stats")  # registered before /ledger/{id} (docs/02 §6)
+async def ledger_stats() -> dict[str, Any]:
+    # "Today" is the persona's calendar day (IST); ts is stored in UTC ISO-8601.
+    start = datetime.now(IST).replace(hour=0, minute=0, second=0, microsecond=0)
+    since = start.astimezone(UTC).isoformat(timespec="seconds")
+
+    def load(conn: sqlite3.Connection) -> dict[str, Any]:
+        row = conn.execute(
+            "SELECT "
+            "COALESCE(SUM(CASE WHEN status != 'blocked' THEN 1 ELSE 0 END), 0) AS calls, "
+            "COALESCE(SUM(entities_masked), 0) AS entities_masked, "
+            "COALESCE(SUM(COALESCE(prompt_tokens, 0) + COALESCE(completion_tokens, 0)), 0) "
+            "AS tokens, "
+            "COALESCE(SUM(cost_usd), 0) AS cost_usd, "
+            "COALESCE(SUM(CASE WHEN status = 'blocked' THEN 1 ELSE 0 END), 0) AS blocked "
+            "FROM egress_events WHERE ts >= ?",
+            (since,),
+        ).fetchone()
+        return {
+            "today": {
+                "calls": int(row["calls"]),
+                "entities_masked": int(row["entities_masked"]),
+                "tokens": int(row["tokens"]),
+                "cost_usd": round(float(row["cost_usd"]), 6),
+                "blocked": int(row["blocked"]),
+            }
+        }
+
+    return await db.run(load)
+
+
+def _local_view(text: str | None, shield: Shield) -> str | None:
+    """Re-identified copy of a stored redacted body. Computed on read, never stored."""
+    if text is None:
+        return None
+    try:
+        parsed = json.loads(text)
+    except ValueError:
+        restored, _, _ = shield.inbound(text)
+        return restored
+    restored, _, _ = shield.inbound(parsed)
+    return json.dumps(restored, ensure_ascii=False)
+
+
+@router.get("/ledger/{event_id}")
+async def ledger_detail(event_id: int) -> dict[str, Any]:
+    def load(conn: sqlite3.Connection) -> dict[str, Any] | None:
+        row = conn.execute("SELECT * FROM egress_events WHERE id = ?", (event_id,)).fetchone()
+        if row is None:
+            return None
+        shield = Shield(conn)
+        out = {k: row[k] for k in LEDGER_FIELDS}
+        out["request_redacted"] = row["request_redacted"]
+        out["response_redacted"] = row["response_redacted"]
+        out["request_local"] = _local_view(row["request_redacted"], shield)
+        out["response_local"] = _local_view(row["response_redacted"], shield)
+        try:
+            out["entity_kinds"] = json.loads(row["entity_kinds"] or "{}")
+        except ValueError:
+            out["entity_kinds"] = {}
+        return out
+
+    result = await db.run(load)
+    if result is None:
+        raise HTTPException(status_code=404, detail="ledger row not found")
+    return result
