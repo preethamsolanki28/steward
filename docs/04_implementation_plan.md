@@ -178,7 +178,7 @@ How to tick:
   - uvicorn/httpx log at INFO without bodies. Runs 1 Uvicorn worker. Blocking work goes through `anyio.to_thread`.
   - `/` serves `web/out`.
   - `GET /api/health` returns `{ok, hermes, token_factory, tavily, mail_mode, model_primary}`.
-- [ ] **T1.2** — Connectors: mail_demo (demo_mail) + smtp with DEMO_MAIL_REDIRECT + tests — E2 — 2.5h
+- [x] **T1.2** — Connectors: mail_demo (demo_mail) + smtp with DEMO_MAIL_REDIRECT + tests — E2 — 2.5h
   - `connectors/mail_demo.py` reads and writes `demo_mail` (folders inbox/sent).
   - `connectors/smtp.py` sends via smtplib in a thread, only when `DEMO_MAIL_REDIRECT` is set. It sends to that address with the subject prefix `[Steward demo → original@x.example]`. `MAIL_MODE=demo` is the only mode in the MVP.
 - [ ] **T1.3** — MCP server steward-tools (mcp 2.2.0 MCPServer mount, bearer middleware): mail_search, mail_read (+ header contact upsert), files_list, files_read (safe_path), contacts_lookup, web_search (Tavily + identifier guard), brief_save; untrusted wrapping; audit rows; tests — E1 — 6h
