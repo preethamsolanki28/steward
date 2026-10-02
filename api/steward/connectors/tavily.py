@@ -157,9 +157,7 @@ async def search(client: httpx.AsyncClient, query: str, max_results: int = 5) ->
             headers={"Authorization": f"Bearer {settings.tavily_api_key}"},
         )
         status = "ok" if r.status_code == 200 else "error"
-        payload: dict[str, Any] = (
-            r.json() if status == "ok" else {"error": f"HTTP {r.status_code}"}
-        )
+        payload: dict[str, Any] = r.json() if status == "ok" else {"error": f"HTTP {r.status_code}"}
     except (httpx.HTTPError, ValueError) as exc:
         status, payload = "error", {"error": type(exc).__name__}
     latency = int((time.monotonic() - started) * 1000)

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from steward import health
+from steward import health, jobs
 
 
 @pytest.fixture(autouse=True)
@@ -32,4 +32,9 @@ def isolated_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("STEWARD_PROXY_KEY", "test-proxy-key")
     monkeypatch.setenv("STEWARD_MCP_TOKEN", "test-mcp-token")
     health._cache.clear()
+
+    async def no_registration(client: object) -> None:
+        return None
+
+    monkeypatch.setattr(jobs, "register_on_startup", no_registration)
     return tmp_path

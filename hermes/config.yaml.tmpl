@@ -57,4 +57,25 @@ mcp_servers:
       resources: false
       prompts: false
 
-# TODO(T1.4): pin every auxiliary.<task> to this custom provider and steward-auto.
+# Every auxiliary task goes to the same proxy as the main model (docs/02 §2a). `main` resolves
+# to the custom provider above, so base_url + key_env are reused and no key is written here.
+# Task list = auxiliary.* in Hermes v2026.9.24 DEFAULT_CONFIG.
+auxiliary:
+  vision: {provider: main, model: steward-auto}
+  compression: {provider: main, model: steward-auto}
+  skills_hub: {provider: main, model: steward-auto}
+  approval: {provider: main, model: steward-auto}
+  review: {provider: main, model: steward-auto}
+  mcp: {provider: main, model: steward-auto}
+  title_generation: {provider: main, model: steward-auto}
+  memory_query_rewrite: {provider: main, model: steward-auto}
+  tts_audio_tags: {provider: main, model: steward-auto}
+  triage_specifier: {provider: main, model: steward-auto}
+  kanban_decomposer: {provider: main, model: steward-auto}
+  profile_describer: {provider: main, model: steward-auto}
+  goal_judge: {provider: main, model: steward-auto}
+  curator: {provider: main, model: steward-auto}
+  monitor: {provider: main, model: steward-auto}
+  background_review: {provider: main, model: steward-auto}
+  moa_reference: {provider: main, model: steward-auto}
+  moa_aggregator: {provider: main, model: steward-auto}

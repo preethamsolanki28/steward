@@ -5,6 +5,7 @@ falls through to the root dispatcher, which sends exactly /mcp to the bearer-gua
 (D20) and every other path to the static dashboard (web/out).
 """
 
+import asyncio
 import hmac
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -14,7 +15,7 @@ import httpx
 from fastapi import FastAPI
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from steward import db
+from steward import db, jobs
 from steward.config import get_settings
 from steward.guards import ApiGuard
 from steward.routers import api, mcp_tools, proxy
@@ -57,7 +58,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with httpx.AsyncClient() as http, mcp_tools.mcp_server.session_manager.run():
         app.state.http = http
         mcp_tools.set_http_client(http)
-        yield
+        registration = asyncio.create_task(jobs.register_on_startup(http))
+        try:
+            yield
+        finally:
+            registration.cancel()
 
 
 # No /docs, /redoc or /openapi.json: only the endpoints in docs/02 §6 exist.
