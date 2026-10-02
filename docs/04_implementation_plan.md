@@ -159,7 +159,7 @@ How to tick:
     - Placeholder chip `#CCFBF1`/`#134E4A`; blocked chip `#FEE2E2`/`#991B1B`.
   - Light mode only. Inter (UI) and JetBrains Mono (payloads, placeholders, IDs), self-hosted via `next/font`.
   - Components: Button, Card, Badge, Tabs, Sheet, Dialog, Table, Textarea, Input, Separator, ScrollArea, Skeleton, Tooltip, Alert, Switch (read-only display), Sonner.
-- [ ] **T0.8** — `lib/types.ts` from docs/02 §6 (API endpoints) + `lib/fixtures.ts` mock mode so UI work never waits on the API — E2 — 2h
+- [x] **T0.8** — `lib/types.ts` from docs/02 §6 (API endpoints) + `lib/fixtures.ts` mock mode so UI work never waits on the API — E2 — 2h
   - Types mirror every request and response in the docs/02 API list. The fixtures cover seed-like data for every screen and state.
 - [ ] **T0.9** — 5 short conversations with real freelancers/consultants (Days 1–5); 5-line summary into docs/00 — E2 — 2h
   - Runs Oct 3–7. The summary is cited as "n=5 conversations, Oct 2026". Until then, docs say "(validate in T0.9)". No invented numbers.
