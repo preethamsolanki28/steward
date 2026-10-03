@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -35,13 +36,22 @@ def risk_context(conn: sqlite3.Connection) -> risk.RiskContext:
     return risk.context([(r["email"], r["org"]) for r in trusted], get_settings().owner_email)
 
 
+def single_line(text: str) -> bool:
+    """No line break of any kind (CR, LF, VT, FF, NEL, U+2028/2029, FS/GS/RS) and no other
+    control character: what email headers accept, so a queued action can always be sent."""
+    return len(text.splitlines()) <= 1 and not any(
+        unicodedata.category(c) in ("Cc", "Zl", "Zp") for c in text
+    )
+
+
 def mail_args(
     to: str | list[str] | None, subject: str, body: str, in_reply_to: str | int | None
 ) -> dict[str, Any]:
     raw = [to] if isinstance(to, str) else list(to or [])
-    if any("\r" in str(x) or "\n" in str(x) for x in [*raw, subject]):
-        raise InvalidAction("recipients and subject must be single-line")
     rcpts = risk.normalize_recipients(to)
+    # Checked before and after normalization: a JSON-list string can hide a real CR/LF.
+    if not all(single_line(str(x)) for x in [*raw, *rcpts, subject]):
+        raise InvalidAction("recipients and subject must be single-line")
     if not rcpts:
         raise InvalidAction("to must list at least one recipient")
     args: dict[str, Any] = {"to": rcpts, "subject": subject, "body": body}

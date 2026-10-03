@@ -528,3 +528,22 @@ def test_execute_time_safe_path_recheck(tmp_path: Path) -> None:
         "files_write → failed",
     )
     assert list(outside.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    "sep", [" ", " ", "\x85", "\x0b", "\x0c", "\x1c", "\x1d", "\x1e", "\t", "\x00"]
+)
+def test_any_line_separator_or_control_in_subject_queues_nothing(
+    client: TestClient, sep: str
+) -> None:
+    ok, out = call(client, "mail_send", **{**LEGIT, "subject": f"Re: INV-0042{sep}reminder"})
+    assert not ok and "single-line" in out
+    assert q("SELECT COUNT(*) AS n FROM actions")[0]["n"] == 0
+
+
+def test_crlf_hidden_in_a_json_list_recipient_queues_nothing(client: TestClient) -> None:
+    to = json.dumps([f"{RAHUL}\r\nBcc: x@evil.invalid"])  # the raw string has no real CR/LF
+    assert "\r" not in to
+    ok, out = call(client, "mail_send", to=to, subject="s", body="b")
+    assert not ok and "single-line" in out
+    assert q("SELECT COUNT(*) AS n FROM actions")[0]["n"] == 0
