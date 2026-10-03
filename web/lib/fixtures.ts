@@ -36,11 +36,15 @@ export const FIXTURE_SCENARIOS = [
   "hermes_down",
   "tf_down",
   "tf_no_key",
-  "tavily_down", // brief without "Watch topics", tavily dot no_key
+  "tavily_down", // brief without "Watch topics", tavily dot down
+  "tavily_no_key", // brief without "Watch topics", tavily dot no_key
   "model_unavailable", // POST /api/chat -> 502
   "chat_timeout", // POST /api/chat -> 504
   "r0", // pending action with an unresolved placeholder
-  "approve_409", // approve -> 409 (risk recomputed to High)
+  "approve_409", // approve -> 409 (files_write target appeared: risk recomputed to High)
+  "approve_failed", // approve -> 200 with status 'failed' (SMTP refused)
+  "approve_delivery_unknown", // approve -> 200 with status 'failed' + delivery unknown
+  "run_now_error", // POST /api/skills/morning-brief/run -> 502
   "memory_empty",
   "memory_over_limit", // PUT /api/memory -> 400
   "network_error", // every request throws, like `make down`
@@ -60,24 +64,33 @@ function isScenario(value: string): value is FixtureScenario {
   return (FIXTURE_SCENARIOS as readonly string[]).includes(value);
 }
 
+/** sessionStorage can throw (private mode, blocked storage): mock mode then lasts one page load. */
+function safeStorage<T>(fn: () => T): T | null {
+  try {
+    return fn();
+  } catch {
+    return null;
+  }
+}
+
 /** Returns the active mock-mode config, or null when mock mode is off (always null on the server). */
 export function getFixtureConfig(): FixtureConfig | null {
   if (typeof window === "undefined") return null;
   const params = new URLSearchParams(window.location.search);
   const fromUrl = params.get("fixtures");
   if (fromUrl === "off") {
-    window.sessionStorage.removeItem(STORAGE_KEY);
+    safeStorage(() => window.sessionStorage.removeItem(STORAGE_KEY));
     return null;
   }
   if (fromUrl !== null) {
     const scenario = fromUrl === "" ? "seed" : fromUrl;
     const slowMs = Number(params.get("slow") ?? 0) || 0;
     if (isScenario(scenario)) {
-      window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ scenario, slowMs }));
+      safeStorage(() => window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ scenario, slowMs })));
       return { scenario, slowMs };
     }
   }
-  const stored = window.sessionStorage.getItem(STORAGE_KEY);
+  const stored = safeStorage(() => window.sessionStorage.getItem(STORAGE_KEY));
   if (!stored) return null;
   try {
     const parsed = JSON.parse(stored) as FixtureConfig;
@@ -159,7 +172,7 @@ function health(scenario: FixtureScenario): HealthResponse {
     ok: true,
     hermes: scenario === "hermes_down" ? "down" : "up",
     token_factory: scenario === "tf_down" ? "down" : scenario === "tf_no_key" ? "no_key" : "up",
-    tavily: scenario === "tavily_down" ? "no_key" : "up",
+    tavily: scenario === "tavily_down" ? "down" : scenario === "tavily_no_key" ? "no_key" : "up",
     mail_mode: "demo",
     model_primary: SUPER,
   };
@@ -186,7 +199,8 @@ function briefLatest(scenario: FixtureScenario): BriefLatestResponse {
     brief: {
       id: 1,
       created_at: ranAt,
-      content_md: BRIEF_MD_HEAD + (scenario === "tavily_down" ? "" : BRIEF_MD_WATCH),
+      content_md:
+        BRIEF_MD_HEAD + (scenario === "tavily_down" || scenario === "tavily_no_key" ? "" : BRIEF_MD_WATCH),
     },
     job: { last_run_at: ranAt, last_status: "ok", next_run_at: istToday(8, 0, 1) },
   };
@@ -233,7 +247,7 @@ function conversationDetail(id: number): ConversationDetail | null {
 }
 
 const MEMORY_DIFF =
-  "--- MEMORY.md\n+++ MEMORY.md\n@@ -3 +3,3 @@\n Maya works Monday to Friday, 10:00 to 18:00 IST, and prefers to handle client email in the morning.\n+§\n+Rahul at Acme Logistics prefers short, formal emails.";
+  "--- a/MEMORY.md\n+++ b/MEMORY.md\n@@ -3 +3,3 @@\n Maya works Monday to Friday, 10:00 to 18:00 IST, and prefers to handle client email in the morning.\n+§\n+Rahul at Acme Logistics prefers short, formal emails.";
 
 function activity(scenario: FixtureScenario): ActivityItem[] {
   if (scenario === "empty") return [];
@@ -247,15 +261,15 @@ function activity(scenario: FixtureScenario): ActivityItem[] {
     detail: string | null = null,
   ): ActivityItem => ({ id, ts: minutesAgo(m), kind, summary, detail, ref_table, ref_id });
   return [
-    a(1, 300, "tool_call", "mcp_steward_mail_search"),
-    a(2, 299, "tool_call", "mcp_steward_files_list"),
+    a(1, 300, "tool_call", "mcp__steward__mail_search"),
+    a(2, 299, "tool_call", "mcp__steward__files_list"),
     a(3, 299, "egress", "Tavily search", "egress_events", 3),
-    a(4, 298, "tool_call", "mcp_steward_brief_save"),
+    a(4, 298, "tool_call", "mcp__steward__brief_save"),
     a(5, 298, "skill_run", "morning-brief · scheduled run", "briefs", 1),
     a(6, 16, "memory_edit", "Memory changed by Steward", null, null, MEMORY_DIFF),
-    a(7, 13, "tool_call", "mcp_steward_files_read"),
-    a(8, 13, "tool_call", "mcp_steward_mail_search"),
-    a(9, 12, "egress", "Nemotron 3.5 Lightning · 7 identifiers masked", "egress_events", 1),
+    a(7, 13, "tool_call", "mcp__steward__files_read"),
+    a(8, 13, "tool_call", "mcp__steward__mail_search"),
+    a(9, 12, "egress", "Nemotron 3 Super · 7 identifiers masked", "egress_events", 1),
     a(10, 12, "action_created", "mail_send → queued", "actions", 1),
     a(11, 8, "action_created", "mail_send → queued", "actions", 2),
     a(12, 5, "policy_block", "Blocked: identifier would have left the Mac", "egress_events", 5),
@@ -272,10 +286,11 @@ function actions(scenario: FixtureScenario): Action[] {
     risk_reasons: string[],
     status: Action["status"],
     result: string | null = null,
+    tool: Action["tool"] = "mail_send",
   ): Action => ({
     id,
     created_at: minutesAgo(m),
-    tool: "mail_send",
+    tool,
     args_json: JSON.stringify(args),
     preview: JSON.stringify(args, null, 2),
     risk,
@@ -299,6 +314,7 @@ function actions(scenario: FixtureScenario): Action[] {
     act(5, 360, { to: ["sara.khan@orbitra-foods.example"], subject: "Q4 reporting quote", body: "Hi Sara,\n\nQuote attached.\n\nBest, Maya" }, "low", [], "failed", "SMTP error: 535 authentication failed"),
     // ASSUMPTION (T3.3): an SMTP timeout ends as status 'failed' with the delivery-unknown result.
     act(6, 340, { to: ["tom.becker@juniper-co.example"], subject: "Thanks", body: "Hi Tom,\n\nThanks for the quick payment.\n\nBest, Maya" }, "low", [], "failed", DELIVERY_UNKNOWN),
+    act(8, 6, { path: "notes/acme-follow-up.md", content: "# Acme follow-up\n\n- Chased INV-0042 on Oct 3.\n" }, "low", [], "pending", null, "files_write"),
   ];
   if (scenario === "r0") {
     rows.unshift(
@@ -331,7 +347,7 @@ function ledgerRows(scenario: FixtureScenario): LedgerRow[] {
   ): LedgerRow => ({ id, ts: minutesAgo(m), channel, destination, model, escalated_from, entities_masked, latency_ms, cost_usd, status });
   return [
     r(6, 4, "llm", TF_HOST, NANO, null, 3, 60_400, 0, "error"),
-    r(5, 5, "llm", TF_HOST, SUPER, null, 0, 0, 0, "blocked"),
+    r(5, 5, "llm", TF_HOST, null, null, 0, 0, 0, "blocked"),
     r(4, 7, "mail", "smtp.gmail.com", null, null, 0, 1_850, 0, "ok"),
     r(2, 12, "llm", TF_HOST, LIGHTNING, SUPER, 7, 21_300, 0.0071, "ok"),
     r(1, 12, "llm", TF_HOST, SUPER, null, 7, 9_800, 0.0013, "ok"),
@@ -372,35 +388,51 @@ const toolCallResponse = (to: string, subject: string, body: string) => ({
         role: "assistant",
         content: null,
         tool_calls: [
-          { id: "call_2", type: "function", function: { name: "mcp_steward_mail_send", arguments: JSON.stringify({ to: [to], subject, body }) } },
+          { id: "call_2", type: "function", function: { name: "mcp__steward__mail_send", arguments: JSON.stringify({ to: [to], subject, body }) } },
         ],
       },
     },
   ],
 });
-const pretty = (v: unknown) => JSON.stringify(v, null, 2);
+// The API stores bodies as compact JSON strings (ledger/store.py).
+const pretty = (v: unknown) => JSON.stringify(v);
 
 function ledgerDetail(row: LedgerRow): LedgerDetail {
   const base = { ...row, entity_kinds: {} };
   switch (row.channel) {
-    case "web":
-      return { ...base, request_redacted: pretty({ query: "warehouse robotics funding", max_results: 5 }), response_redacted: pretty({ results: [{ title: "Fixture result", url: "https://example.com/fixture-1" }] }), request_local: pretty({ query: "warehouse robotics funding", max_results: 5 }), response_local: pretty({ results: [{ title: "Fixture result", url: "https://example.com/fixture-1" }] }) };
-    case "mail":
-      return { ...base, request_redacted: pretty({ to: RAHUL_DRAFT.to, subject: `[Steward demo → ${RAHUL_DRAFT.to[0]}] ${RAHUL_DRAFT.subject}` }), response_redacted: null, request_local: pretty({ to: RAHUL_DRAFT.to, subject: `[Steward demo → ${RAHUL_DRAFT.to[0]}] ${RAHUL_DRAFT.subject}` }), response_local: null };
+    case "web": {
+      const req = pretty({ query: "warehouse robotics funding", max_results: 5 });
+      const res = pretty([{ title: "Fixture result, not real news", url: "https://example.com/fixture-1", snippet: "Fixture snippet." }]);
+      return { ...base, request_redacted: req, response_redacted: res, request_local: req, response_local: res };
+    }
+    case "mail": {
+      const mid = "<steward-action-1@rao-consulting.example>";
+      return {
+        ...base,
+        request_redacted: pretty({ to: ["team-inbox@team.example"], subject: "[Steward demo → [[EMAIL_1]]] INV-0042: payment reminder", message_id: "<steward-action-1@[[DOMAIN_2]]>", body: "Dear [[PERSON_1]],\n\nThis is a reminder that INV-0042 for [[MONEY_1]] was due 12 days ago.\n\nBest, Maya" }),
+        response_redacted: null,
+        request_local: pretty({ to: ["team-inbox@team.example"], subject: `[Steward demo → ${RAHUL_DRAFT.to[0]}] ${RAHUL_DRAFT.subject}`, message_id: mid, body: RAHUL_DRAFT.body }),
+        response_local: null,
+      };
+    }
     default:
       break;
   }
   if (row.status === "blocked") {
-    const blocked = pretty({ model: SUPER, messages: [{ role: "user", content: "Use token «BLOCKED:SECRET» to call the tools" }] });
+    const blocked = pretty({ model: "steward-auto", messages: [{ role: "user", content: "Here is the token you asked for: «BLOCKED:SECRET»" }] });
     return { ...base, request_redacted: blocked, response_redacted: null, request_local: blocked, response_local: null };
+  }
+  if (row.status === "error") {
+    const req = pretty(SENT_REQ);
+    return { ...base, request_redacted: req, response_redacted: pretty({ error: "upstream unavailable: all models failed" }), request_local: pretty(LOCAL_REQ), response_local: pretty({ error: "upstream unavailable: all models failed" }) };
   }
   return {
     ...base,
     entity_kinds: { ORG: 2, PERSON: 1, EMAIL: 1, ACCOUNT: 2, MONEY: 1 },
     request_redacted: pretty(SENT_REQ),
-    response_redacted: row.status === "error" ? null : pretty(toolCallResponse("[[EMAIL_1]]", "INV-0042: payment reminder", "Dear [[PERSON_1]],\n\nThis is a reminder that INV-0042 for [[MONEY_1]] was due 12 days ago.\n\nBest, Maya")),
+    response_redacted: pretty(toolCallResponse("[[EMAIL_1]]", "INV-0042: payment reminder", "Dear [[PERSON_1]],\n\nThis is a reminder that INV-0042 for [[MONEY_1]] was due 12 days ago.\n\nBest, Maya")),
     request_local: pretty(LOCAL_REQ),
-    response_local: row.status === "error" ? null : pretty(toolCallResponse(RAHUL_DRAFT.to[0], RAHUL_DRAFT.subject, RAHUL_DRAFT.body)),
+    response_local: pretty(toolCallResponse(RAHUL_DRAFT.to[0], RAHUL_DRAFT.subject, RAHUL_DRAFT.body)),
   };
 }
 
@@ -408,7 +440,7 @@ function ledgerStats(scenario: FixtureScenario): LedgerStatsResponse {
   const rows = ledgerRows(scenario);
   return {
     today: {
-      calls: rows.length,
+      calls: rows.filter((r) => r.status !== "blocked").length, // like the API: blocked rows are not calls
       entities_masked: rows.reduce((n, r) => n + r.entities_masked, 0),
       tokens: scenario === "empty" ? 0 : 61_420,
       cost_usd: rows.reduce((n, r) => n + r.cost_usd, 0),
@@ -436,8 +468,18 @@ function memory(scenario: FixtureScenario): MemoryResponse {
 }
 
 const SKILLS: Skill[] = [
-  { name: "invoice-chase", description: "Find the overdue invoice and the latest thread, draft a reminder in the tone the client prefers, then queue mail_send for approval.", runnable: false },
-  { name: "morning-brief", description: "Daily 08:00 IST: client mail needing replies, overdue invoices, and a Tavily search on each client's watch topics (never client names).", runnable: true },
+  {
+    name: "invoice-chase",
+    description:
+      "Chase an overdue client invoice — read the invoice, look up the trusted contact, read their latest email thread, draft a reminder in the tone that client prefers, and queue it for the user's approval. Before acting, load this skill with skill_view; it holds the required steps and safety rules.",
+    runnable: false,
+  },
+  {
+    name: "morning-brief",
+    description:
+      "Daily morning brief. Client mail that needs a reply, overdue invoices, and news on each client's watch topics, saved with brief_save.",
+    runnable: true,
+  },
 ];
 
 function settings(): SettingsResponse {
@@ -472,7 +514,7 @@ function store(scenario: FixtureScenario) {
 }
 
 const ok = (body: unknown): FixtureResponse => ({ status: 200, body });
-const err = (status: number, detail: string): FixtureResponse => ({ status, body: { detail } });
+const err = (status: number, detail: string, extra: object = {}): FixtureResponse => ({ status, body: { detail, ...extra } });
 
 export async function fixtureFetch(
   method: string,
@@ -490,15 +532,15 @@ export async function fixtureFetch(
 
   if (m === "GET" && pathname === "/api/health") return ok(health(scenario));
   if (m === "POST" && pathname === "/api/chat") {
-    if (scenario === "model_unavailable") return err(502, CHAT_ERROR_MODEL_UNAVAILABLE);
-    if (scenario === "chat_timeout") return err(504, CHAT_ERROR_STILL_WORKING);
-    const req = body as { conversation_id?: number; message?: string };
+    const req = body as { conversation_id?: number | null; message?: string };
+    if (scenario === "model_unavailable") return err(502, CHAT_ERROR_MODEL_UNAVAILABLE, { conversation_id: req.conversation_id ?? 3 });
+    if (scenario === "chat_timeout") return err(504, CHAT_ERROR_STILL_WORKING, { conversation_id: req.conversation_id ?? 3 });
     return ok({ conversation_id: req.conversation_id ?? 3, reply: `Fixture reply to: ${req.message ?? ""}`, message_id: 99 });
   }
   if (m === "GET" && pathname === "/api/conversations") return ok(conversations(scenario));
   if (m === "GET" && /^\/api\/conversations\/\d+$/.test(pathname)) {
     const detail = conversationDetail(id(/(\d+)$/));
-    return detail ? ok(detail) : err(404, "Not Found");
+    return detail ? ok(detail) : err(404, "conversation not found");
   }
   if (m === "GET" && pathname === "/api/activity") {
     const after = Number(searchParams.get("after_id") ?? 0) || 0;
@@ -511,20 +553,29 @@ export async function fixtureFetch(
   const decide = pathname.match(/^\/api\/actions\/(\d+)\/(approve|reject)$/);
   if (m === "POST" && decide) {
     const action = s.actions.find((a) => a.id === Number(decide[1]));
-    if (!action) return err(404, "Not Found");
-    if (action.status !== "pending") return err(409, "Action already decided");
+    if (!action) return err(404, "action not found");
+    if (action.status !== "pending") return err(409, "Action already decided", { action });
     if (decide[2] === "reject") {
       Object.assign(action, { status: "rejected", decided_at: new Date().toISOString() });
       return ok({ action });
     }
     const confirm = (body as { confirm_high?: boolean } | undefined)?.confirm_high === true;
-    if (action.risk_reasons.includes(RISK_REASON_UNRESOLVED_PLACEHOLDER)) return err(409, RISK_REASON_UNRESOLVED_PLACEHOLDER);
-    if (scenario === "approve_409" && !confirm) {
-      Object.assign(action, { risk: "high", risk_reasons: ["overwrites existing file"] });
-      return err(409, "Risk is now High; confirm to approve");
+    if (action.risk_reasons.includes(RISK_REASON_UNRESOLVED_PLACEHOLDER)) {
+      return err(409, RISK_REASON_UNRESOLVED_PLACEHOLDER, { action });
     }
-    if (action.risk === "high" && !confirm) return err(409, "High-risk action needs confirm_high");
-    Object.assign(action, { status: "executed", decided_at: new Date().toISOString(), result: null });
+    if (scenario === "approve_409" && action.tool === "files_write" && action.risk === "low" && !confirm) {
+      Object.assign(action, { risk: "high", risk_reasons: ["overwrites existing file"] });
+      return err(409, "Risk is now High; confirm to approve", { action });
+    }
+    if (action.risk === "high" && !confirm) return err(409, "High-risk action needs confirm_high", { action });
+    const decided_at = new Date().toISOString();
+    if (scenario === "approve_failed" && action.tool === "mail_send") {
+      Object.assign(action, { status: "failed", decided_at, result: "SMTP error: SMTPAuthenticationError: (535, b'5.7.8 Username and Password not accepted')" });
+    } else if (scenario === "approve_delivery_unknown" && action.tool === "mail_send") {
+      Object.assign(action, { status: "failed", decided_at, result: DELIVERY_UNKNOWN });
+    } else {
+      Object.assign(action, { status: "executed", decided_at, result: null });
+    }
     return ok({ action });
   }
   if (m === "GET" && pathname === "/api/ledger/stats") return ok(ledgerStats(scenario));
@@ -535,18 +586,28 @@ export async function fixtureFetch(
   }
   if (m === "GET" && /^\/api\/ledger\/\d+$/.test(pathname)) {
     const row = ledgerRows(scenario).find((r) => r.id === id(/(\d+)$/));
-    return row ? ok(ledgerDetail(row)) : err(404, "Not Found");
+    return row ? ok(ledgerDetail(row)) : err(404, "ledger row not found");
   }
   if (m === "GET" && pathname === "/api/memory") return ok(s.memory);
   if (m === "PUT" && pathname === "/api/memory") {
     const req = body as { file: "memory" | "user"; entries: string[] };
     const limit = req.file === "memory" ? MEMORY_LIMIT : USER_LIMIT;
-    if (scenario === "memory_over_limit" || charCount(req.entries) > limit) return err(400, "Memory not saved — over the limit");
-    s.memory[req.file] = { ...s.memory[req.file], entries: req.entries, chars: charCount(req.entries) } as never;
+    const entries = req.entries.map((e) => e.trim()).filter(Boolean); // like the API
+    if (entries.some((e) => e.split("\n").some((line) => line.trim() === "§"))) {
+      return err(400, "An entry cannot contain a line that is only §");
+    }
+    const chars = charCount(entries);
+    if (scenario === "memory_over_limit" || chars > limit) {
+      return err(400, `Memory not saved — over the limit (${scenario === "memory_over_limit" ? limit + 1 : chars} > ${limit})`);
+    }
+    s.memory[req.file] = { ...s.memory[req.file], entries, chars } as never;
     return ok({ ok: true });
   }
   if (m === "GET" && pathname === "/api/skills") return ok(SKILLS);
-  if (m === "POST" && pathname === "/api/skills/morning-brief/run") return ok({ ok: true });
+  if (m === "POST" && pathname === "/api/skills/morning-brief/run") {
+    if (scenario === "run_now_error" || scenario === "hermes_down") return err(502, "Hermes is unreachable");
+    return ok({ ok: true });
+  }
   if (m === "GET" && pathname === "/api/briefs/latest") return ok(briefLatest(scenario));
   if (m === "GET" && pathname === "/api/contacts") return ok(contacts());
   if (m === "GET" && pathname === "/api/settings") return ok(settings());

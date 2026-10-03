@@ -314,7 +314,7 @@ How to tick:
 
 ### M4 — Dashboard (Day 3–10, 31h; E2 except T4.6; built against fixtures first, then the live API)
 
-- [ ] **T4.1** — `lib/api.ts` (X-Steward-Client header) + `usePoll` + health pill + nav badge — E2 — 2h
+- [x] **T4.1** — `lib/api.ts` (X-Steward-Client header) + `usePoll` + health pill + nav badge — E2 — 2h
   - The health pill shows Hermes · Token Factory · Tavily · mail mode, from `/api/health`. The Approvals Badge shows the pending count. Network errors show as a sonner toast.
 - [ ] **T4.2** — Chat screen + BriefCard + ActivityRail + error/timeout cards — E2 — 10h
   - Layout: conversation list + "New chat"; thread + composer.

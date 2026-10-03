@@ -9,7 +9,10 @@ const alertVariants = cva(
       variant: {
         default: "bg-card text-card-foreground",
         destructive:
-          "bg-card text-destructive *:data-[slot=alert-description]:text-destructive/90 *:[svg]:text-current",
+          "border-destructive/60 bg-card text-destructive *:data-[slot=alert-description]:text-destructive/90 *:[svg]:text-current",
+        // docs/03 §2: amber is for icons and borders only; the text stays #1C1917.
+        warning:
+          "border-warning bg-card text-foreground *:data-[slot=alert-description]:text-foreground *:[svg]:text-warning",
       },
     },
     defaultVariants: {

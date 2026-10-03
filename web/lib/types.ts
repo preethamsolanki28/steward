@@ -1,10 +1,10 @@
 // Request/response types for the steward-api control plane, mirroring docs/02 §6 (API endpoints)
 // and the §5 tables they read from. Field names are exactly as in the docs.
 //
-// Where docs/02 leaves a wire detail open, the choice is marked "ASSUMPTION (Tx.y)": the named
-// backend task confirms or changes it, and this file follows.
+// Where docs/02 left a wire detail open, the choice was marked "ASSUMPTION (Tx.y)"; the backend
+// tasks have since confirmed each one against the live API (verified 2026-10-03, M4/T4.1).
 
-/** ISO-8601 timestamp string, e.g. "2026-10-03T08:00:04+05:30". */
+/** ISO-8601 timestamp. Steward rows are UTC ("…+00:00"); Hermes job times are "+05:30". */
 export type IsoTime = string;
 
 // ---------------------------------------------------------------------------
@@ -60,15 +60,28 @@ export interface ConversationDetail {
   messages: Message[];
 }
 
-/**
- * Error body for non-2xx responses.
- * ASSUMPTION (T1.1/T1.6): FastAPI's default `{detail}` shape. For /api/chat, docs/02 §7a fixes the
- * copy but not the status codes; fixtures use 502 for "Model unavailable — this turn did not
- * complete" and 504 for "Still working — check Approvals and Activity".
- */
+/** Error body for non-2xx responses: FastAPI's `{detail}` (verified, T1.1). */
 export interface ApiError {
   detail: string;
 }
+
+/** POST /api/chat 502 ("Model unavailable…") and 504 ("Still working…") also carry the
+ *  conversation the user message was stored in (verified, T1.6). */
+export interface ChatErrorBody extends ApiError {
+  conversation_id?: number;
+}
+
+/** 409 from approve/reject: the action as it now stands (verified, T3.3). */
+export interface ActionConflictBody extends ApiError {
+  action: Action;
+}
+
+/** FastAPI request-validation error (422). */
+export interface ValidationErrorBody {
+  detail: Array<{ loc: Array<string | number>; msg: string; type: string }>;
+}
+
+export type ApiErrorBody = ChatErrorBody | ActionConflictBody | ValidationErrorBody | ApiError;
 
 export const CHAT_ERROR_MODEL_UNAVAILABLE = "Model unavailable — this turn did not complete";
 export const CHAT_ERROR_STILL_WORKING = "Still working — check Approvals and Activity";
@@ -130,7 +143,7 @@ export interface Action {
   args_json: string;
   preview: string;
   risk: Risk;
-  /** ASSUMPTION (T3.3): served parsed (the column stores JSON); shown verbatim, joined with " · ". */
+  /** Served parsed (verified, T3.3); shown verbatim, joined with " · ". */
   risk_reasons: string[];
   status: ActionStatus;
   decided_at: IsoTime | null;
@@ -142,7 +155,7 @@ export interface ApproveRequest {
   confirm_high?: boolean;
 }
 
-/** `{action}` in docs/02 §6. ASSUMPTION (T3.3): wrapped as `{ action: Action }`. */
+/** `{action}` in docs/02 §6, wrapped as `{ action: Action }` (verified, T3.3). */
 export interface ActionResponse {
   action: Action;
 }
@@ -177,7 +190,7 @@ export interface LedgerDetail extends LedgerRow {
   /** Re-identified on read, never stored. */
   request_local: string;
   response_local: string | null;
-  /** ASSUMPTION (T2.4): served parsed as counts per kind, e.g. {"PERSON": 1, "MONEY": 1}. */
+  /** Served parsed as counts per kind, e.g. {"PERSON": 1, "MONEY": 1} (verified, T2.4). */
   entity_kinds: Partial<Record<VaultKind, number>>;
 }
 
@@ -193,6 +206,9 @@ export interface LedgerStatsResponse {
 
 /** Placeholder kinds minted by the Shield (vault.kind). */
 export type VaultKind = "PERSON" | "EMAIL" | "ORG" | "DOMAIN" | "PHONE" | "ACCOUNT" | "MONEY";
+
+/** Kinds that can appear in a «BLOCKED:KIND» span of a blocked ledger row. */
+export type BlockedKind = VaultKind | "SECRET" | "IDENTIFIER";
 
 // ---------------------------------------------------------------------------
 // Memory: GET /api/memory, PUT /api/memory
@@ -242,7 +258,7 @@ export interface Brief {
 
 export interface BriefJob {
   last_run_at: IsoTime | null;
-  /** From Hermes GET /api/jobs/{id}. ASSUMPTION (T1.7): Hermes' own status string, e.g. "ok". */
+  /** From Hermes GET /api/jobs/{id}: Hermes' own status string, "ok" or "error" (verified, T1.7). */
   last_status: string | null;
   next_run_at: IsoTime | null;
 }
@@ -258,10 +274,11 @@ export interface BriefLatestResponse {
 
 export type ContactSource = "seed" | "mail";
 
-/** A `contacts` row (docs/02 §5). ASSUMPTION (T1.1): trusted served as 0/1 like the column. */
+/** A `contacts` row (docs/02 §5); trusted is 0/1 like the column. */
 export interface Contact {
   id: number;
-  name: string;
+  /** null for addresses seen only in mail headers. */
+  name: string | null;
   email: string;
   org: string | null;
   trusted: 0 | 1;
