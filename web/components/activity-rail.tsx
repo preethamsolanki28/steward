@@ -202,7 +202,7 @@ export function ActivityRail({ items, loading, onShowBrief, onNavigate }: Activi
       </div>
 
       <Sheet open={diff !== null} onOpenChange={(o) => !o && setDiff(null)}>
-        <SheetContent side="right" className="w-full gap-0 sm:max-w-lg">
+        <SheetContent side="right" className="gap-0 data-[side=right]:w-full data-[side=right]:sm:max-w-lg">
           <SheetHeader>
             <SheetTitle>Memory changed by Steward</SheetTitle>
             <SheetDescription>What Steward changed in its memory, as a diff.</SheetDescription>

@@ -193,7 +193,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   )}
                 </Button>
               </SheetTrigger>
-              <SheetContent side="left" className="w-72 gap-0 p-0">
+              <SheetContent side="left" className="gap-0 p-0 data-[side=left]:w-72">
                 <SheetTitle className="px-4 py-4 text-base font-semibold">Steward</SheetTitle>
                 <div className="flex-1 px-2">
                   <NavLinks pathname={pathname} onNavigate={() => setMenuOpen(false)} />

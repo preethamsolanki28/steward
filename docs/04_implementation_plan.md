@@ -351,7 +351,7 @@ How to tick:
     - R0 disables Approve.
   - A failed or "delivery unknown" action shows its own card.
   - Empty state: "Nothing waiting for you. Steward asks before it sends anything."
-- [ ] **T4.4** — Ledger screen + scoped LedgerDiff + stats — E2 — 8h
+- [x] **T4.4** — Ledger screen + scoped LedgerDiff + stats — E2 — 8h
   - Stats tiles: calls today, identifiers masked, est. cost, blocked.
   - Table: time, channel llm/web/mail, destination, model, masked, latency, status. Escalated rows show "↑" + the model used (e.g. "↑ Lightning").
   - Clicking a row opens a right Sheet with the **LedgerDiff**.

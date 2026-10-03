@@ -361,6 +361,11 @@ const LOCAL_REQ = {
     { role: "system", content: "<Hermes system prompt with the memory snapshot and skills index>" },
     { role: "user", content: "Chase the Acme invoice" },
     {
+      role: "assistant",
+      content: "",
+      tool_calls: [{ id: "call_1", type: "function", function: { name: "mcp__steward__files_read", arguments: JSON.stringify({ path: "invoices/INV-0042.md" }) } }],
+    },
+    {
       role: "tool",
       tool_call_id: "call_1",
       content:
@@ -373,6 +378,11 @@ const SENT_REQ = {
   messages: [
     { role: "system", content: "<Hermes system prompt with the memory snapshot and skills index>" },
     { role: "user", content: "Chase the [[ORG_1]] invoice" },
+    {
+      role: "assistant",
+      content: "",
+      tool_calls: [{ id: "call_1", type: "function", function: { name: "mcp__steward__files_read", arguments: JSON.stringify({ path: "invoices/INV-0042.md" }) } }],
+    },
     {
       role: "tool",
       tool_call_id: "call_1",

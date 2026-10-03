@@ -347,13 +347,13 @@ export default function ChatPage() {
       <aside className="hidden w-80 shrink-0 border-l border-border bg-card xl:block">{rail()}</aside>
 
       <Sheet open={convSheet} onOpenChange={setConvSheet}>
-        <SheetContent side="left" className="w-72 gap-0 p-0">
+        <SheetContent side="left" className="gap-0 p-0 data-[side=left]:w-72">
           <SheetTitle className="px-4 pt-4 text-base font-semibold">Conversations</SheetTitle>
           {list}
         </SheetContent>
       </Sheet>
       <Sheet open={railSheet} onOpenChange={setRailSheet}>
-        <SheetContent side="right" className="w-80 gap-0 p-0">
+        <SheetContent side="right" className="gap-0 p-0 data-[side=right]:w-80">
           <SheetTitle className="sr-only">Activity</SheetTitle>
           {rail(() => setRailSheet(false))}
         </SheetContent>
