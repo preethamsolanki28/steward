@@ -46,6 +46,7 @@ BARE = re.compile(r"\b(?:PERSON|ORG|EMAIL|DOMAIN|PHONE|ACCOUNT|MONEY)[_ ]\d+\b")
 BARE_ANY_CASE = re.compile(BARE.pattern, re.IGNORECASE)
 # A plain addr-spec: no whitespace (Unicode line separators included), quotes, comments, angle
 # brackets, commas, semicolons, colons or square brackets. Only these are normalized.
+_QUOTED = re.compile(r'"(?:[^"\\]|\\.)*"')
 _ADDR_SPEC = re.compile(r'[^\s"(),:;<>@\[\]\\]+@[^\s"(),:;<>@\[\]\\]+')
 
 # Confusable folding (docs/02 §7a): Cyrillic and Greek lookalikes of Latin letters, then
@@ -183,15 +184,18 @@ def _canonical(addr: str) -> str | None:
 
 
 def _split_recipients(raw: str) -> list[str]:
+    raw = raw.strip().strip(",;").strip()  # "a@x," — strict parsing refuses a dangling separator
     if not raw:
         return []
     plain = _canonical(raw)
     if plain:
         return [plain]
-    if "(" in raw or ")" in raw:  # RFC 5322 comments would be silently dropped by the parser
+    # A "(comment)" outside quoted display names would be silently dropped by the parser and
+    # could hide another address: keep such a string whole. Quoted names may contain "()".
+    if re.search(r"[()]", _QUOTED.sub("", raw)):
         return [raw]
-    pairs = getaddresses([raw.replace(";", ",")])
-    addrs = [_canonical(addr) for _, addr in pairs]
+    pairs = [(n, a) for n, a in getaddresses([raw.replace(";", ",")]) if n or a]
+    addrs = [_canonical(addr) for _, addr in pairs]  # a trailing "," gives an empty pair
     if addrs and all(addrs):
         return [a for a in addrs if a]
     return [raw]
@@ -302,11 +306,16 @@ def _strings(value: Any) -> Iterable[str]:
 # --- rules ---------------------------------------------------------------------------------
 
 
-def r0_unresolved_placeholder(args: Mapping[str, Any]) -> list[str]:
+def r0_unresolved_placeholder(
+    args: Mapping[str, Any], known: frozenset[str] = frozenset()
+) -> list[str]:
+    """known: addresses that are real contacts (trusted, owner); a token-like local part such
+    as account_1@x in one of them is not a placeholder."""
     for text in _strings(args):
         if TOLERANT.search(text) or BARE.search(text):
             return [UNRESOLVED_PLACEHOLDER]
-    if any(BARE_ANY_CASE.search(text) for text in _strings(args.get("to"))):
+    recipients_ = [t for t in _strings(args.get("to")) if t.lower() not in known]
+    if any(BARE_ANY_CASE.search(text) for text in recipients_):
         return [UNRESOLVED_PLACEHOLDER]
     return []
 
@@ -349,7 +358,7 @@ def assess(
 ) -> tuple[Risk, list[str]]:
     """Risk and reasons for a mail_send / files_write action. Every rule means High. Reasons are
     not deduplicated across recipients: each untrusted recipient keeps its own reasons."""
-    reasons = r0_unresolved_placeholder(args)
+    reasons = r0_unresolved_placeholder(args, ctx.trusted_emails | {ctx.owner_email})
     if tool == "mail_send":
         rcpts = recipients(args, ctx)
         reasons += r1_untrusted_recipients(rcpts, ctx)

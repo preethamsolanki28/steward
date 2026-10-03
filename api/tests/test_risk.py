@@ -306,6 +306,9 @@ TRICKY_TO = [
     "[[EMAIL_1]]",
     "rahul.verma@DOMAIN_1",
     "x@gmail.com.",
+    f"{RAHUL},",
+    f'"Rahul Verma (Acme)" <{RAHUL}>',
+    f"PERSON_3 <{RAHUL}>",
     "",
     " ",
 ]
@@ -313,10 +316,16 @@ TRICKY_TO = [
 
 @pytest.mark.parametrize("to", TRICKY_TO)
 def test_normalization_is_idempotent_so_scored_equals_stored(to: str) -> None:
+    # actions.py stores normalize(to) in args_json and scores that stored value (at queue and
+    # approve time); the executor sends it. Idempotency means all three are the same list.
     once = risk.normalize_recipients(to)
     assert risk.normalize_recipients(once) == once
-    # what actions.py stores (normalized) scores exactly like what the model sent
-    assert risk.assess("mail_send", mail(once), CTX) == risk.assess("mail_send", mail(to), CTX)
+    assert risk.recipients({"to": once}, CTX) == [r for r in once if r != OWNER]
+
+
+@pytest.mark.parametrize("to", [f"{RAHUL},", f"{RAHUL}, ", f'"Rahul Verma (Acme)" <{RAHUL}>'])
+def test_common_legit_recipient_forms_stay_low(to: str) -> None:
+    assert risk.assess("mail_send", mail(risk.normalize_recipients(to)), CTX) == ("low", [])
 
 
 def test_attacker_address_hidden_in_a_comment_is_never_low() -> None:
@@ -337,13 +346,25 @@ def test_address_lists_in_one_string_are_split() -> None:
     assert risk.normalize_recipients(f"Verma, Rahul <{RAHUL}>") == [f"Verma, Rahul <{RAHUL}>"]
 
 
-@pytest.mark.parametrize(
-    "to",
-    ["rahul.verma@DOMAIN_1", "EMAIL_1@DOMAIN_1", "⟦EMAIL_1⟧@x.example", "PERSON 3 <a@b.example>"],
-)
+@pytest.mark.parametrize("to", ["rahul.verma@DOMAIN_1", "EMAIL_1@DOMAIN_1", "⟦EMAIL_1⟧@x.example"])
 def test_r0_catches_bare_placeholders_inside_recipients(to: str) -> None:
-    reasons = risk.assess("mail_send", mail([to]), CTX)[1]
+    stored = risk.normalize_recipients([to])  # production scores the stored, lower-cased form
+    reasons = risk.assess("mail_send", mail(stored), CTX)[1]
     assert reasons[0] == risk.UNRESOLVED_PLACEHOLDER and not risk.approvable(reasons)
+
+
+def test_placeholder_in_a_display_name_is_dropped_never_sent() -> None:
+    # "PERSON_3 <rahul.verma@…>": the display name is not stored or sent; the address is scored.
+    stored = risk.normalize_recipients([f"PERSON_3 <{RAHUL}>"])
+    assert stored == [RAHUL] and risk.assess("mail_send", mail(stored), CTX) == ("low", [])
+
+
+def test_token_like_address_of_a_real_contact_is_not_a_placeholder() -> None:
+    ctx = risk.context([("account_1@acme-logistics.example", "Acme Logistics")], OWNER)
+    assert risk.assess("mail_send", mail(["account_1@acme-logistics.example"]), ctx) == ("low", [])
+    assert risk.assess("mail_send", mail(["account_2@acme-logistics.example"]), ctx)[1][0] == (
+        risk.UNRESOLVED_PLACEHOLDER
+    )
 
 
 def test_each_lookalike_recipient_keeps_its_own_reason() -> None:
