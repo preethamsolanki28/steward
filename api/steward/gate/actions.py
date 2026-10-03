@@ -37,10 +37,11 @@ def risk_context(conn: sqlite3.Connection) -> risk.RiskContext:
 
 
 def single_line(text: str) -> bool:
-    """No line break of any kind (CR, LF, VT, FF, NEL, U+2028/2029, FS/GS/RS) and no other
-    control character: what email headers accept, so a queued action can always be sent."""
+    """No line break of any kind (CR, LF, VT, FF, NEL, U+2028/2029, FS/GS/RS) and no control
+    character other than a horizontal tab (legal header whitespace): what email headers accept,
+    so a queued action can always be sent."""
     return len(text.splitlines()) <= 1 and not any(
-        unicodedata.category(c) in ("Cc", "Zl", "Zp") for c in text
+        unicodedata.category(c) in ("Cc", "Zl", "Zp") and c != "\t" for c in text
     )
 
 
