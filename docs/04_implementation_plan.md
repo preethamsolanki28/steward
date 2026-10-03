@@ -448,8 +448,9 @@ Tick a box only after you have seen it pass yourself. Runtime items are checked 
 - [x] web shell renders 4 routes at desktop and 375px
 
 ### M1
-- [ ] `/api/chat "Chase the Acme invoice"` → agent calls files_read + mail_search and returns a draft
+- [x] `/api/chat "Chase the Acme invoice"` → agent calls files_read + mail_search and returns a draft
   - Check: `curl -s -X POST http://127.0.0.1:8787/api/chat -H 'Content-Type: application/json' -H 'X-Steward-Client: web' -d '{"message":"Chase the Acme invoice"}'`, then `curl -s 'http://127.0.0.1:8787/api/activity?after_id=0'` shows `tool_call` rows for files_read and mail_search.
+  - 2026-10-03 (after T3.4 shipped `/api/activity`): live run showed `tool_call` rows `mcp__steward__files_read` ×2, `mcp__steward__mail_search`, `mcp__steward__mail_read`, `mcp__steward__mail_send`; Super reads the thread in 8/10 harness runs (docs/02 §12, DG-1 after T3.1).
 - [x] `make brief-now` saves a brief containing a Tavily result
   - Check: `curl -s http://127.0.0.1:8787/api/briefs/latest`.
 - [x] DG-2 path proven (learned memory applied in a new conversation, or a PUT /api/memory edit applied in the next new conversation)
@@ -464,6 +465,7 @@ Tick a box only after you have seen it pass yourself. Runtime items are checked 
 ### M3
 - [ ] T3.5 passes in CI
   - Dependency: T5.7 (full CI) is scheduled in M5, but `.github/workflows/ci.yml` exists from T0.1, and T3.5 adds the pytest job. It has to run pytest by Day 9. Otherwise M3 cannot be ticked on time and the should-have gate stays closed.
+  - 2026-10-03: the pytest job is in `ci.yml` (T3.5). Its exact steps (`uv sync --locked`, `uv run pytest`, uv 0.12.10, Python 3.12) pass on `main` in a clean `linux/amd64` `python:3.12.15-slim-bookworm` container: 369 passed. Not ticked: the repo has no GitHub remote yet, so no GitHub Actions run exists; tick on the first green Actions run.
 
 ### M4
 - [ ] all 4 screens work against the live API with seed data

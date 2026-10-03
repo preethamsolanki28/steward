@@ -119,6 +119,22 @@ _TYPES: dict[str, type | tuple[type, ...]] = {
 }
 
 
+TRUSTED_RAHUL = "rahul.verma@acme-logistics.example"
+
+
+def _flat(text: str) -> str:
+    return text.replace("\u2011", "-").replace("\u202f", " ")
+
+
+def _draft_content_ok(text: str) -> bool:
+    return (
+        bool(re.search(r"\b(Dear|Hi|Hello)\s+Rahul\b", text))
+        and "INV-0042" in text
+        and "4,800" in text
+        and not placeholder_like(text)
+    )
+
+
 def tool_schemas(request_redacted: str | None) -> dict[str, dict[str, Any]]:
     try:
         req = json.loads(request_redacted or "null")
@@ -173,7 +189,11 @@ def score(
     tools: list[str],
     vault: set[str],
     turn_max_id: int | None = None,
+    queued: list[dict[str, Any]] | None = None,
 ) -> Run:
+    """queued: the actions rows created during the run ({tool, args_json, risk}). From T3.1 on,
+    mail_send is offered and the DG-1 queue step is scored: exactly one mail_send, after
+    files_read and mail_search, that queues a Low-risk draft to the trusted contact."""
     probes = sum(1 for r in rows if r["channel"] == "llm" and is_path_probe(r))
     llm = [r for r in rows if r["channel"] == "llm" and not is_path_probe(r)]
     blocked = sum(r["status"] == "blocked" for r in llm)
@@ -183,8 +203,10 @@ def score(
     schema_errs: list[str] = []
     post_turn: list[str] = []
     mail_send = 0
+    offered = False
     count = {"all": [0, 0], "turn": [0, 0], "draft": [0, 0]}  # [intact, total]
     draft_text = ""
+    send_args_raw = ""
 
     def tally(text: str, *keys: str) -> None:
         for token in placeholder_like(text):
@@ -199,6 +221,7 @@ def score(
         resp = json.loads(r["response_redacted"])
         schemas = tool_schemas(r.get("request_redacted"))
         in_turn = turn_max_id is None or r.get("id", 0) <= turn_max_id
+        offered = offered or (in_turn and MAIL_SEND in schemas)
         for choice in resp.get("choices") or []:
             msg = choice.get("message") or {}
             texts = [str(msg.get("content") or "")]
@@ -210,6 +233,8 @@ def score(
                 if name == MAIL_SEND and name not in schemas:
                     mail_send += in_turn
                     continue
+                if name == MAIL_SEND and in_turn:
+                    send_args_raw = raw  # the draft as the model wrote it (placeholders)
                 try:
                     args = json.loads(raw)
                 except (TypeError, ValueError):
@@ -224,17 +249,30 @@ def score(
                 tally(text, "all", *(["turn"] if in_turn else []))
             if in_turn and msg.get("content") and not msg.get("tool_calls"):
                 draft_text = str(msg["content"])
-    tally(draft_text, "draft")
+    tally(send_args_raw if offered else draft_text, "draft")
     short = [t.removeprefix("mcp__steward__") for t in tools]
-    order_ok = "files_read" in short and "mail_search" in short
-    flat = reply.replace("‑", "-").replace(" ", " ")
+    flat = _flat(reply)
     unresolved = len(placeholder_like(flat))
-    draft_ok = (
-        bool(re.search(r"\b(Dear|Hi|Hello)\s+Rahul\b", flat))
-        and "INV-0042" in flat
-        and "4,800" in flat
-        and unresolved == 0
-    )
+    if offered:
+        sends = [i for i, t in enumerate(short) if t == "mail_send"]
+        order_ok = (
+            len(sends) == 1
+            and "files_read" in short[: sends[0]]
+            and "mail_search" in short[: sends[0]]
+        )
+        mails = [a for a in queued or [] if a["tool"] == "mail_send"]
+        draft_ok = False
+        if len(mails) == 1:
+            args = json.loads(mails[0]["args_json"])
+            draft_ok = (
+                args.get("to") == [TRUSTED_RAHUL]
+                and mails[0]["risk"] == "low"
+                and _draft_content_ok(_flat(f"{args.get('subject', '')}\n{args.get('body', '')}"))
+                and unresolved == 0
+            )
+    else:
+        order_ok = "files_read" in short and "mail_search" in short
+        draft_ok = _draft_content_ok(flat)
     json_ok = not invalid
     schema_ok = json_ok and not schema_errs
     paused = any("rejected the last" in (r.get("request_redacted") or "") for r in llm)
@@ -366,6 +404,15 @@ def table(rows: list[dict[str, Any]]) -> str:
     return "\n".join(out)
 
 
+def queued_in(q: Any, audit_after: int, audit_to: int | None) -> list[dict[str, Any]]:
+    """The actions rows a run created (via their action_created audit rows)."""
+    return q(
+        "SELECT tool, args_json, risk FROM actions WHERE id IN (SELECT ref_id FROM audit_events "
+        "WHERE kind = 'action_created' AND id > ? AND id <= ?) ORDER BY id",
+        (audit_after, 2**62 if audit_to is None else audit_to),
+    )
+
+
 def rescore(data: dict[str, Any], q: Any) -> list[Run]:
     """Score stored runs again from their ledger/audit windows (no new model calls). The vault
     is read now; it only ever grows, so a placeholder minted after a run counts as known."""
@@ -395,6 +442,7 @@ def rescore(data: dict[str, Any], q: Any) -> list[Run]:
             tools,
             vault,
             turn_max_id=w["egress_reply"],
+            queued=queued_in(q, w["audit_after"], w["audit_to"]),
         )
         run.window = w
         runs.append(run)
@@ -413,6 +461,10 @@ def main(argv: list[str] | None = None) -> int:
     # keeps one run's pause from leaking into the next run, so runs stay independent.
     parser.add_argument("--gap", type=float, default=60.0, help="seconds between runs")
     parser.add_argument("--rescore", type=Path, help="re-score a results file; no model calls")
+    parser.add_argument(
+        "--reasoning-effort",
+        help="settings.reasoning_effort for this run (DG-1 ladder step 1); restored afterwards",
+    )
     args = parser.parse_args(argv)
 
     def q(sql: str, params: tuple = ()) -> list[dict[str, Any]]:
@@ -423,9 +475,14 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.rescore:
         data = json.loads(args.rescore.read_text())
-        return report(rescore(data, q), f"{data['stamp']}-rescored")
+        return report(rescore(data, q), f"{data['stamp']}-rescored", data.get("reasoning_effort"))
 
     original = db.with_conn(lambda conn: db.get_setting(conn, "model_primary"))
+    original_effort = db.with_conn(lambda conn: db.get_setting(conn, "reasoning_effort"))
+    effort = args.reasoning_effort if args.reasoning_effort is not None else original_effort
+    if args.reasoning_effort is not None:
+        db.with_conn(lambda conn: db.set_setting(conn, "reasoning_effort", args.reasoning_effort))
+    print(f"reasoning_effort: {effort!r}", flush=True)
     stamp = time.strftime("%Y%m%d-%H%M%S")
     runs: list[Run] = []
     base = "http://steward-api:8787"
@@ -488,6 +545,7 @@ def main(argv: list[str] | None = None) -> int:
                         tools,
                         vault,
                         turn_max_id=eg_reply,
+                        queued=queued_in(q, au0, None),
                     )
                     au1 = q("SELECT COALESCE(MAX(id), 0) AS m FROM audit_events")[0]["m"]
                     eg1 = max([eg0, *(r["id"] for r in rows)])
@@ -510,17 +568,25 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         if original:
             set_primary(original)
-    return report(runs, stamp)
+        if args.reasoning_effort is not None and original_effort is not None:
+            db.with_conn(lambda conn: db.set_setting(conn, "reasoning_effort", original_effort))
+    return report(runs, stamp, effort)
 
 
-def report(runs: list[Run], stamp: str) -> int:
+def report(runs: list[Run], stamp: str, reasoning_effort: str | None = None) -> int:
     rows = summarize(runs)
     result = verdict(rows)
     out = Path("/data/t03") / f"results-shield-{stamp}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(
         json.dumps(
-            {"stamp": stamp, "rows": rows, "verdict": result, "runs": [asdict(r) for r in runs]},
+            {
+                "stamp": stamp,
+                "reasoning_effort": reasoning_effort,
+                "rows": rows,
+                "verdict": result,
+                "runs": [asdict(r) for r in runs],
+            },
             indent=2,
             ensure_ascii=False,
         )
