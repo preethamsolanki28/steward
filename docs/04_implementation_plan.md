@@ -305,7 +305,7 @@ How to tick:
     - `GET /api/actions?status=pending|all`
     - `POST /api/actions/{id}/approve` with `{confirm_high?}`
     - `POST /api/actions/{id}/reject`
-- [ ] **T3.4** — `/api/activity` feed — E2 — 1h
+- [x] **T3.4** — `/api/activity` feed — E2 — 1h
   - `GET /api/activity?after_id=` → `audit_events` rows `[{id, ts, kind, summary, detail, ref_table, ref_id}]`.
   - Built in the M1 window because the M1 Done-when check and the Chat polling use it.
 - [ ] **T3.5** — E2E test: legit chase → Low → approve → exactly one send; BEC → High "lookalike of acme-logistics.example" → reject → nothing sent; concurrent double-approve → one send — E2 — 2h
