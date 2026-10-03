@@ -21,6 +21,7 @@ Reject: the same conditional UPDATE to 'rejected'; audited as action_decided.
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import threading
 import time
@@ -36,6 +37,7 @@ from steward.gate import actions, risk
 from steward.ledger import store
 from steward.shield import Shield
 
+log = logging.getLogger("steward.gate")
 MESSAGE_ID = "<steward-action-{id}@rao-consulting.example>"
 ALREADY_DECIDED = "Action already decided"
 NOT_FOUND = "action not found"
@@ -181,6 +183,11 @@ def _store_sent(conn: sqlite3.Connection, args: dict[str, Any]) -> int:
     )
 
 
+def _copy_not_stored(message_id: str, exc: BaseException) -> dict[str, Any]:
+    action_id = message_id.removeprefix("<steward-action-").split("@", 1)[0]
+    return {"action_id": action_id, "copy": f"not stored ({type(exc).__name__})"}
+
+
 def _mail_egress(
     conn: sqlite3.Connection,
     args: dict[str, Any],
@@ -209,8 +216,8 @@ def _mail_egress(
 
         request = redacted(message)
         response = redacted({"result": result}) if result else None
-    except Exception as exc:  # never lose the row; never store an unredacted body
-        request = {"message_id": message_id, "copy": f"not stored ({type(exc).__name__})"}
+    except Exception as exc:  # never lose the row; store nothing that could identify anyone
+        request = _copy_not_stored(message_id, exc)
         response = None
     store.insert(
         conn,
@@ -258,6 +265,7 @@ async def _execute_mail(action: dict[str, Any], progress: dict[str, str]) -> dic
     except Exception as exc:  # never retried; the class name only (no message body, no secret)
         result, summary = f"send error: {type(exc).__name__}", "mail_send → failed"
     latency_ms = int((time.monotonic() - started) * 1000)
+    progress["latency_ms"] = str(latency_ms)
 
     def finish(conn: sqlite3.Connection) -> dict[str, Any]:
         if egress is not None:
@@ -295,10 +303,12 @@ def _write_file(
     return "executed", None, "files_write → written"
 
 
-async def _execute_write(action: dict[str, Any]) -> dict[str, Any]:
+async def _execute_write(action: dict[str, Any], progress: dict[str, str]) -> dict[str, Any]:
     args = json.loads(action["args_json"])
     allow_overwrite = risk.OVERWRITES in (action.get("risk_reasons") or [])
     status, result, summary = await anyio.to_thread.run_sync(_write_file, args, allow_overwrite)
+    if status == "executed":
+        progress["write"] = "written"
     return await db.run(lambda conn: _finish(conn, int(action["id"]), status, result, summary))
 
 
@@ -306,16 +316,41 @@ async def _finish_after_error(
     action: dict[str, Any], exc: BaseException, progress: dict[str, str]
 ) -> dict[str, Any]:
     """Something broke after the claim (e.g. the database while recording the result). The row
-    must not stay 'approved' forever: record what is known, in a fresh transaction."""
-    tool = action["tool"]
+    must not stay 'approved' forever: record what is known, in a fresh transaction. If an SMTP
+    attempt was made, its mail ledger row is written too (a copy without the body)."""
+    action_id, tool = int(action["id"]), action["tool"]
     status: Literal["executed", "failed"] = "failed"
+    egress: Literal["ok", "error"] | None = None
     if progress.get("smtp") == "sent":
-        status, result, summary = "executed", None, "mail_send → sent"
+        status, result, summary, egress = "executed", None, "mail_send → sent", "ok"
     elif progress.get("smtp") == "attempted":
-        result, summary = smtp.DELIVERY_UNKNOWN, "mail_send → delivery unknown"
+        result, summary, egress = smtp.DELIVERY_UNKNOWN, "mail_send → delivery unknown", "error"
+    elif progress.get("write") == "written":
+        status, result, summary = "executed", None, "files_write → written"
     else:
         result, summary = f"execution error: {type(exc).__name__}", f"{tool} → failed"
-    return await db.run(lambda conn: _finish(conn, int(action["id"]), status, result, summary))
+
+    def record(conn: sqlite3.Connection) -> dict[str, Any]:
+        if egress is not None:
+            try:
+                store.insert(
+                    conn,
+                    channel="mail",
+                    destination=get_settings().smtp_host or "smtp",
+                    status=egress,
+                    request_redacted=_copy_not_stored(MESSAGE_ID.format(id=action_id), exc),
+                    latency_ms=int(progress.get("latency_ms", "0")),
+                )
+            except Exception as ledger_exc:  # the action's final state comes first
+                # The exception type only: never a body or an address.
+                log.error(
+                    "action #%s: mail ledger row not written (%s)",
+                    action_id,
+                    type(ledger_exc).__name__,
+                )
+        return _finish(conn, action_id, status, result, summary)
+
+    return await db.run(record)
 
 
 async def execute(action: dict[str, Any]) -> dict[str, Any]:
@@ -329,7 +364,7 @@ async def execute(action: dict[str, Any]) -> dict[str, Any]:
             if action["tool"] == "mail_send":
                 done = await _execute_mail(action, progress)
             else:
-                done = await _execute_write(action)
+                done = await _execute_write(action, progress)
         except Exception as exc:
             done = await _finish_after_error(action, exc, progress)
     if done is None:  # a shielded scope is never cancelled; this cannot happen

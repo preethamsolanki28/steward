@@ -629,9 +629,12 @@ def test_mail_ledger_row_survives_a_shield_error_without_storing_the_body(
     assert approve(client, aid, {}).json()["action"]["status"] == "executed"
     (eg,) = mail_egress()
     assert json.loads(eg["request_redacted"]) == {
-        "message_id": MESSAGE_ID.format(aid),
+        "action_id": str(aid),
         "copy": "not stored (RuntimeError)",
     }
+    from tests.run_leak_test import found_in, seeded_identifiers
+
+    assert found_in(eg["request_redacted"], seeded_identifiers()) == []
 
 
 def test_failed_send_records_its_real_latency(client: TestClient, redirect: type[FakeSMTP]) -> None:
@@ -643,3 +646,43 @@ def test_failed_send_records_its_real_latency(client: TestClient, redirect: type
 def test_a_tab_in_the_subject_is_legal_header_whitespace(client: TestClient) -> None:
     ok, out = call(client, "mail_send", **{**LEGIT, "subject": "Re: INV-0042\treminder"})
     assert ok and out["risk"] == "low"
+
+
+def _fail_first_finish(monkeypatch: pytest.MonkeyPatch) -> None:
+    from steward.gate import executor
+
+    real, calls = executor._finish, {"n": 0}
+
+    def flaky(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("database is locked")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(executor, "_finish", flaky)
+
+
+def test_transient_error_after_a_send_keeps_the_mail_ledger_row(
+    client: TestClient, redirect: type[FakeSMTP], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _fail_first_finish(monkeypatch)
+    aid = queue(client)
+    assert approve(client, aid, {}).json()["action"]["status"] == "executed"
+    assert redirect.attempts == 1
+    (eg,) = mail_egress()  # every SMTP attempt leaves exactly one ledger row
+    assert eg["status"] == "ok"
+    assert json.loads(eg["request_redacted"]) == {
+        "action_id": str(aid),
+        "copy": "not stored (RuntimeError)",
+    }
+
+
+def test_transient_error_after_a_write_reports_it_written(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _fail_first_finish(monkeypatch)
+    aid = queue(client, "files_write", path="notes/new-plan.md", content="hello\n")
+    a = approve(client, aid, {}).json()["action"]
+    assert (a["status"], a["result"]) == ("executed", None)
+    assert (workspace() / "notes" / "new-plan.md").read_text() == "hello\n"
+    assert [x["summary"] for x in audit("action_executed")] == ["files_write → written"]

@@ -212,3 +212,13 @@ def test_tls_verifies_certificate_and_host_name(
     (context,) = fake_smtp.contexts
     assert isinstance(context, ssl.SSLContext)
     assert context.verify_mode == ssl.CERT_REQUIRED and context.check_hostname
+
+
+def test_connect_timeout_is_delivery_unknown_as_documented(monkeypatch: pytest.MonkeyPatch) -> None:
+    # docs/02 §7a: "on SMTP timeout result = delivery unknown" — also before anything was sent.
+    def slow_connect(*args: object, **kwargs: object) -> socket.socket:
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr(socket, "create_connection", slow_connect)
+    with pytest.raises(smtp.DeliveryUnknown):
+        _real_send(25, monkeypatch)
