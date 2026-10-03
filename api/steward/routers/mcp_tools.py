@@ -155,7 +155,7 @@ async def files_read(path: str) -> dict[str, str]:
 
 @mcp_server.tool()
 async def files_write(path: str, content: str) -> dict[str, Any]:
-    """Queue a workspace file write for the user's approval, e.g. path='notes/acme.md'. This
+    """Queue a workspace file write for the user's approval, e.g. path='notes/follow-up.md'. This
     never writes anything: it creates a pending action and returns its number. Writing over an
     existing file is High risk."""
     await _audit_tool("files_write")

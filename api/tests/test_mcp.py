@@ -85,6 +85,19 @@ def test_exactly_the_nine_tools(client: TestClient) -> None:
     assert sorted(t["name"] for t in r.json()["result"]["tools"]) == TOOLS
 
 
+def test_tool_definitions_pass_the_leak_check(client: TestClient) -> None:
+    # Hermes sends every tool definition to the model verbatim (tools[] is not pseudonymized),
+    # so descriptions and schemas must never name a client (T3.1 regression: "notes/acme.md").
+    from steward.shield import Shield
+
+    tools = _rpc(client, "tools/list", {}).json()["result"]["tools"]
+    with db.connect() as conn:
+        checker = Shield(conn).checker()
+    for tool in tools:
+        hits = checker.scan(json.dumps(tool, ensure_ascii=False))
+        assert hits == [], (tool["name"], hits)
+
+
 def test_mail_search_wraps_and_upserts_headers_untrusted(client: TestClient) -> None:
     ok, hits = call(client, "mail_search", query="acme", limit=5)
     assert ok and hits[0]["from"] == "Vikram Sethi <billing@acme-logistics-payments.example>"
