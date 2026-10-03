@@ -315,19 +315,18 @@ IST = timezone(timedelta(hours=5, minutes=30))
 # --- Activity feed (docs/02 §6; docs/04 T3.4) -------------------------------------------------
 
 ACTIVITY_FIELDS = ("id", "ts", "kind", "summary", "detail", "ref_table", "ref_id")
-ACTIVITY_PAGE = 500
 
 
 @router.get("/activity")
 async def activity(after_id: int = Query(0, ge=0)) -> list[dict[str, Any]]:
-    """audit_events rows with id > after_id, oldest first (the dashboard polls with the last id
-    it has seen). At most 500 per call; page forward with after_id."""
+    """audit_events rows with id > after_id, oldest first. The dashboard polls with the last id
+    it has seen, so after the first call each poll returns only the new rows."""
     cols = ", ".join(ACTIVITY_FIELDS)
     return await db.run(
         lambda conn: db.rows(
             conn.execute(
-                f"SELECT {cols} FROM audit_events WHERE id > ? ORDER BY id ASC LIMIT ?",  # noqa: S608
-                (after_id, ACTIVITY_PAGE),
+                f"SELECT {cols} FROM audit_events WHERE id > ? ORDER BY id ASC",  # noqa: S608
+                (after_id,),
             )
         )
     )

@@ -4,7 +4,6 @@ from fastapi.testclient import TestClient
 
 from steward import db
 from steward.main import app
-from steward.routers import api
 
 LOCAL = "http://127.0.0.1:8787"
 
@@ -37,12 +36,11 @@ def test_activity_pages_forward_in_id_order() -> None:
         assert c.get("/api/activity?after_id=-1").status_code == 422
 
 
-def test_activity_is_capped_per_page(monkeypatch) -> None:
-    monkeypatch.setattr(api, "ACTIVITY_PAGE", 2)
-    ids = _audit(3)
+def test_activity_returns_every_row_after_the_cursor() -> None:
+    ids = _audit(600)  # no page cap (docs/02 §6): the first poll gets the whole feed
     with TestClient(app, base_url=LOCAL) as c:
-        assert [e["id"] for e in c.get("/api/activity").json()] == ids[:2]
-        assert [e["id"] for e in c.get(f"/api/activity?after_id={ids[1]}").json()] == ids[2:]
+        assert [e["id"] for e in c.get("/api/activity").json()] == ids
+        assert len(c.get(f"/api/activity?after_id={ids[99]}").json()) == 500
 
 
 def test_activity_is_behind_the_host_guard() -> None:
