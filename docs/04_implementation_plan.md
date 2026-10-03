@@ -374,7 +374,7 @@ How to tick:
   - **System** tab, read-only:
     - Connector status, the model chain + reasoning effort, Privacy Shield "On", and the ZDR note.
     - Trusted contacts, with "Only these contacts are trusted. Steward cannot change this list."
-- [ ] **T4.6** — State pass (each state triggered: Hermes down → `docker compose stop hermes`; Token Factory down → invalid NEBIUS_API_KEY; empty → fresh `make demo-reset`; blocked → leak-test fixture) + 375px no-horizontal-scroll — E1 — 3h
+- [x] **T4.6** — State pass (each state triggered: Hermes down → `docker compose stop hermes`; Token Factory down → invalid NEBIUS_API_KEY; empty → fresh `make demo-reset`; blocked → leak-test fixture) + 375px no-horizontal-scroll — E1 — 3h
   - Runs on Day 10. Every state in docs/03 must be reproduced with its trigger, at 375px with tap targets ≥44px.
 
 ### M5 — Harden, ship, pitch (Day 11–13, 21h)

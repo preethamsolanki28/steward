@@ -111,6 +111,8 @@ export function ActivityRail({ items, loading, onShowBrief, onNavigate }: Activi
           onNavigate?.();
           onShowBrief();
         };
+      case "memory_edit":
+        return () => setDiff(item.detail ?? "");
       default:
         return undefined;
     }
@@ -162,13 +164,8 @@ export function ActivityRail({ items, loading, onShowBrief, onNavigate }: Activi
                     {item.kind === "memory_edit" && (
                       <>
                         {" — "}
-                        <Button
-                          variant="link"
-                          className="h-auto min-h-0 p-0 text-sm md:h-auto"
-                          onClick={() => setDiff(item.detail ?? "")}
-                        >
-                          review
-                        </Button>
+                        {/* The whole row opens the diff (a 44px target); "review" reads as the link. */}
+                        <span className="text-primary underline-offset-4 hover:underline">review</span>
                       </>
                     )}
                   </span>
