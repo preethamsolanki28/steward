@@ -1,6 +1,6 @@
 ---
 name: invoice-chase
-description: Chase an overdue client invoice. Find the invoice and the client's latest email thread, draft a payment reminder in the tone that client prefers, and queue it for the user's approval.
+description: Chase an overdue client invoice — read the invoice, look up the trusted contact, read their latest email thread, draft a reminder in the tone that client prefers, and queue it for the user's approval. Before acting, load this skill with skill_view; it holds the required steps and safety rules.
 ---
 
 # invoice-chase
