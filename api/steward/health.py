@@ -7,8 +7,9 @@ GET /usage, Hermes GET /health.
 Tavily reports connector usability, not the health of its /usage endpoint, which rate-limits
 far sooner than search does:
 - 200 -> 'up', remembered as the last known good state, re-probed after 5 minutes;
-- 429 -> keeps a known-good 'up' from the last 15 minutes, else 'down'; no new probe before
-  the server's Retry-After (60 s by default), so polling never feeds the rate limit;
+- 429 -> keeps a known-good 'up' for at most 15 minutes after that evidence, else 'down'; no
+  new probe before the server's Retry-After (60 s by default), and consecutive 429s back off
+  (60 s, 2, 4, 8, then 15 minutes), so polling never feeds the rate limit;
 - 401/403 (key refused) -> 'down', and the last good state is forgotten;
 - any other status or a connection error -> 'down', re-probed after 60 s.
 A real web_search that succeeds (or is refused for the key) updates the same state.
@@ -29,6 +30,7 @@ TAVILY_UP_TTL_S = 300.0
 TAVILY_DOWN_TTL_S = 60.0
 TAVILY_KEEP_UP_S = 900.0
 TAVILY_MAX_RETRY_AFTER_S = 900.0
+TAVILY_PROBE_GUARD_S = 10.0  # while a probe runs, concurrent polls reuse the last answer
 # name -> (expires_at, value) for cached probe results; "tavily_ok" -> (seen_at, "up").
 _cache: dict[str, tuple[float, str]] = {}
 
@@ -95,6 +97,10 @@ async def tavily_status(client: httpx.AsyncClient) -> UpDownNoKey:
     hit = _cache.get("tavily")
     if hit and time.monotonic() < hit[0]:
         return hit[1]  # type: ignore[return-value]
+    # Single flight: no await between the check above and this line, so concurrent polls on the
+    # one event loop see this entry and reuse the last answer instead of probing again.
+    _cache["tavily"] = (time.monotonic() + TAVILY_PROBE_GUARD_S, hit[1] if hit else "down")
+    rate_limited = False
     try:
         r = await client.get(
             "https://api.tavily.com/usage",
@@ -109,18 +115,28 @@ async def tavily_status(client: httpx.AsyncClient) -> UpDownNoKey:
             _cache["tavily_ok"] = (now, "up")
             value, ttl = "up", TAVILY_UP_TTL_S
         elif r.status_code == 429:
-            seen = _cache.get("tavily_ok")
-            if seen is not None and now - seen[0] <= TAVILY_KEEP_UP_S:
-                # Keep the known-good 'up', but never past 15 minutes after that evidence.
-                value, ttl = "up", min(_retry_after(r), seen[0] + TAVILY_KEEP_UP_S - now)
-            else:
-                value, ttl = "down", _retry_after(r)
+            rate_limited = True
+            value, ttl = _rate_limited(r, now)
         else:
             if r.status_code in (401, 403):
                 _cache.pop("tavily_ok", None)
             value, ttl = "down", TAVILY_DOWN_TTL_S
+    if not rate_limited:
+        _cache.pop("tavily_429", None)  # any other answer ends a 429 streak
     _cache["tavily"] = (time.monotonic() + ttl, value)
     return value  # type: ignore[return-value]
+
+
+def _rate_limited(r: httpx.Response, now: float) -> tuple[str, float]:
+    """A 429: back off (60 s, 2, 4, 8, then 15 minutes, never less than Retry-After) and keep a
+    known-good 'up' for at most 15 minutes after that evidence."""
+    streak = int(_cache.get("tavily_429", (0.0, ""))[0]) + 1
+    _cache["tavily_429"] = (float(streak), "")
+    wait = max(_retry_after(r), min(TAVILY_DOWN_TTL_S * 2 ** (streak - 1), TAVILY_KEEP_UP_S))
+    seen = _cache.get("tavily_ok")
+    if seen is not None and now - seen[0] <= TAVILY_KEEP_UP_S:
+        return "up", min(wait, seen[0] + TAVILY_KEEP_UP_S - now)
+    return "down", wait
 
 
 async def health(client: httpx.AsyncClient) -> dict[str, object]:

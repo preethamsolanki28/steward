@@ -141,3 +141,46 @@ def test_a_kept_up_never_outlives_the_known_good_window(clock: Clock) -> None:
     assert status(usage) == "up" and usage.calls == 2  # t0+899: still inside 15 minutes
     clock.now += 2
     assert status(usage) == "down" and usage.calls == 3  # t0+901: re-probed, no good state
+
+
+def test_consecutive_429s_back_off_and_a_200_ends_the_streak(clock: Clock) -> None:
+    usage = Usage(r429("60"), r429("60"), r429("60"), httpx.Response(200, json={}), r429("60"))
+    probes_at: list[float] = []
+    start = clock.now
+    while clock.now - start < 600:
+        before = usage.calls
+        status(usage)
+        if usage.calls > before:
+            probes_at.append(clock.now - start)
+        clock.now += 10
+    # 429 at 0 (wait 60), 429 at 60 (wait 120), 429 at 180 (wait 240), 200 at 420 (up 300 s)
+    assert probes_at == [0, 60, 180, 420]
+    clock.now = start + 420 + health.TAVILY_UP_TTL_S + 1
+    status(usage)  # a fresh 429 after the streak ended waits 60 s again, and keeps the 'up'
+    assert health._cache["tavily_429"][0] == 1.0
+
+
+def test_concurrent_polls_share_one_probe(clock: Clock) -> None:
+    calls = {"n": 0}
+
+    async def slow_usage(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        await anyio.sleep(0.05)
+        return httpx.Response(200, json={})
+
+    async def run() -> list[str]:
+        out: list[str] = []
+        async with httpx.AsyncClient(transport=httpx.MockTransport(slow_usage)) as client:
+
+            async def poll() -> None:
+                out.append(await health.tavily_status(client))
+
+            async with anyio.create_task_group() as tg:
+                for _ in range(5):
+                    tg.start_soon(poll)
+        return out
+
+    results = anyio.run(run)
+    assert calls["n"] == 1  # the other four polls reused the last answer during the probe
+    assert status(Usage(httpx.Response(200, json={}))) == "up"
+    assert len(results) == 5
