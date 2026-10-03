@@ -280,7 +280,7 @@ How to tick:
     - Each inserts an `actions` row (status 'pending', preview, risk, risk_reasons) and writes `audit_events(kind='action_created')`.
     - Each returns `{action_id, status:'pending', risk}` with the text "Queued for approval as action #<id>. The user will review it."
     - Neither ever blocks the agent.
-- [ ] **T3.2** — Risk rules R0, R1 + lookalike, R3, overwrite as pure functions + tests (legit Acme Low, BEC High, confusables, TLD swap, owner excluded) — E2 — 3h
+- [x] **T3.2** — Risk rules R0, R1 + lookalike, R3, overwrite as pure functions + tests (legit Acme Low, BEC High, confusables, TLD swap, owner excluded) — E2 — 3h
   - The rules, in `gate/risk.py`:
     - **R0:** a placeholder pattern left in any argument → High, Approve disabled ("unresolved placeholder").
     - **R1:** a recipient who isn't a trusted contact → High.
