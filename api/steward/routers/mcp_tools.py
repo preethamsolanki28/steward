@@ -121,8 +121,10 @@ async def mail_send(
     to: list[str] | str, subject: str, body: str, in_reply_to: str | int | None = None
 ) -> dict[str, Any]:
     """Queue an email for the user's approval. This never sends anything: it creates a pending
-    action and returns its number. `to` is a list of recipient addresses (the trusted
-    contact's email); `in_reply_to` is the id of the email you are replying to, if any."""
+    action and returns its number. For a reminder or a reply, first read your latest email
+    thread with that contact (mail_search, then mail_read) so the draft takes it into account.
+    `to` is a list of recipient addresses (the trusted contact's email); `in_reply_to` is the
+    id of the email you are replying to, if any."""
     await _audit_tool("mail_send")
 
     def work(conn: sqlite3.Connection) -> dict[str, Any]:
