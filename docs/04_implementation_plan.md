@@ -159,6 +159,7 @@ How to tick:
     - Placeholder chip `#CCFBF1`/`#134E4A`; blocked chip `#FEE2E2`/`#991B1B`.
   - Light mode only. Inter (UI) and JetBrains Mono (payloads, placeholders, IDs), self-hosted via `next/font`.
   - Components: Button, Card, Badge, Tabs, Sheet, Dialog, Table, Textarea, Input, Separator, ScrollArea, Skeleton, Tooltip, Alert, Switch (read-only display), Sonner.
+  - Correction (2026-10-03, T4.3): `components/ui/dialog.tsx` was not actually in the repo. It was added in T4.3 on the already-installed `radix-ui` Dialog primitive (the one `sheet.tsx` uses), with no package or lockfile change.
 - [x] **T0.8** — `lib/types.ts` from docs/02 §6 (API endpoints) + `lib/fixtures.ts` mock mode so UI work never waits on the API — E2 — 2h
   - Types mirror every request and response in the docs/02 API list. The fixtures cover seed-like data for every screen and state.
 - [ ] **T0.9** — 5 short conversations with real freelancers/consultants (Days 1–5); 5-line summary into docs/00 — E2 — 2h
@@ -339,7 +340,7 @@ How to tick:
     - "Model unavailable — this turn did not complete" with Retry.
     - "Still working — check Approvals and Activity".
   - Below 1280px the Activity rail becomes a right Sheet opened by an "Activity" button, and below 1024px the conversation list becomes a left Sheet (docs/03 §6.1).
-- [ ] **T4.3** — Approvals screen + confirm Dialog — E2 — 4h
+- [x] **T4.3** — Approvals screen + confirm Dialog — E2 — 4h
   - Tabs: Pending / History.
   - ActionCard:
     - Shows the tool, recipients, subject, a monospace body preview, and a risk Badge (Low/High).
