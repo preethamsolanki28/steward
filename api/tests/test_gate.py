@@ -531,7 +531,7 @@ def test_execute_time_safe_path_recheck(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "sep", [" ", " ", "\x85", "\x0b", "\x0c", "\x1c", "\x1d", "\x1e", "\t", "\x00"]
+    "sep", [" ", " ", "\x85", "\x0b", "\x0c", "\x1c", "\x1d", "\x1e", "\x00", "\x07"]
 )
 def test_any_line_separator_or_control_in_subject_queues_nothing(
     client: TestClient, sep: str
@@ -638,3 +638,8 @@ def test_failed_send_records_its_real_latency(client: TestClient, redirect: type
     redirect.fail, redirect.delay = TimeoutError("timed out"), 0.05
     approve(client, queue(client), {})
     assert mail_egress()[0]["latency_ms"] >= 50
+
+
+def test_a_tab_in_the_subject_is_legal_header_whitespace(client: TestClient) -> None:
+    ok, out = call(client, "mail_send", **{**LEGIT, "subject": "Re: INV-0042\treminder"})
+    assert ok and out["risk"] == "low"
