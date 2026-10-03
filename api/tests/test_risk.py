@@ -288,3 +288,93 @@ def test_osa_distance() -> None:
 def test_approvable_only_without_r0() -> None:
     assert risk.approvable([f"{BEC_TO} is not a trusted contact"])
     assert not risk.approvable([risk.UNRESOLVED_PLACEHOLDER])
+
+
+# --- review regressions (M3 adversarial review) ----------------------------------------------
+
+TRICKY_TO = [
+    RAHUL,
+    f"Rahul Verma <{RAHUL}>",
+    f'"{RAHUL} (cc {BEC_TO})',  # unmatched quote + comment around a second address
+    f'<"{RAHUL}">',
+    f'"{RAHUL}"',
+    f"{RAHUL} (cc {BEC_TO})",
+    f"Verma, Rahul <{RAHUL}>",
+    f"{RAHUL}, anita.shah@brightleaf-clinics.example",
+    f"{RAHUL}; {BEC_TO}",
+    f'["{RAHUL}", "{BEC_TO}"]',
+    "[[EMAIL_1]]",
+    "rahul.verma@DOMAIN_1",
+    "x@gmail.com.",
+    "",
+    " ",
+]
+
+
+@pytest.mark.parametrize("to", TRICKY_TO)
+def test_normalization_is_idempotent_so_scored_equals_stored(to: str) -> None:
+    once = risk.normalize_recipients(to)
+    assert risk.normalize_recipients(once) == once
+    # what actions.py stores (normalized) scores exactly like what the model sent
+    assert risk.assess("mail_send", mail(once), CTX) == risk.assess("mail_send", mail(to), CTX)
+
+
+def test_attacker_address_hidden_in_a_comment_is_never_low() -> None:
+    for to in (f'"{RAHUL} (cc {BEC_TO})', f"{RAHUL} (cc {BEC_TO})", f'<"{RAHUL}">'):
+        level, reasons = risk.assess("mail_send", mail([to]), CTX)
+        assert level == "high", to
+        (stored,) = risk.normalize_recipients([to])
+        assert reasons[0] == f"{stored} is not a trusted contact"
+
+
+def test_address_lists_in_one_string_are_split() -> None:
+    two = "anita.shah@brightleaf-clinics.example, li.wei@kestrel-robotics.example"
+    assert risk.normalize_recipients(two) == two.split(", ")
+    assert risk.assess("mail_send", mail(two), CTX) == ("low", [])
+    five = "; ".join([*TRUSTED, BEC_TO])
+    assert risk.TOO_MANY_RECIPIENTS in risk.assess("mail_send", mail(five), CTX)[1]
+    # an unparseable list stays whole (High), never silently trimmed
+    assert risk.normalize_recipients(f"Verma, Rahul <{RAHUL}>") == [f"Verma, Rahul <{RAHUL}>"]
+
+
+@pytest.mark.parametrize(
+    "to",
+    ["rahul.verma@DOMAIN_1", "EMAIL_1@DOMAIN_1", "⟦EMAIL_1⟧@x.example", "PERSON 3 <a@b.example>"],
+)
+def test_r0_catches_bare_placeholders_inside_recipients(to: str) -> None:
+    reasons = risk.assess("mail_send", mail([to]), CTX)[1]
+    assert reasons[0] == risk.UNRESOLVED_PLACEHOLDER and not risk.approvable(reasons)
+
+
+def test_each_lookalike_recipient_keeps_its_own_reason() -> None:
+    second = "billing@acme-logistics-pay.example"
+    assert risk.assess("mail_send", mail([BEC_TO, second]), CTX)[1] == [
+        f"{BEC_TO} is not a trusted contact",
+        "lookalike of acme-logistics.example",
+        f"{second} is not a trusted contact",
+        "lookalike of acme-logistics.example",
+    ]
+
+
+@pytest.mark.parametrize(
+    "label, trusted",
+    [("orbitra-foodß", "orbitra-foods.example"), ("acme-logistiςs", "acme-logistics.example")],
+)
+def test_idna2008_punycode_is_decoded(label: str, trusted: str) -> None:
+    ace = "xn--" + label.encode("punycode").decode()
+    assert f"lookalike of {trusted}" in reasons_for(f"billing@{ace}.example")
+
+
+@pytest.mark.parametrize("tld", ["examplе", "examp1e", "exarnple"])  # Cyrillic е; 1->l; rn->m
+def test_confusable_tld_is_a_different_tld(tld: str) -> None:
+    assert "lookalike of acme-logistics.example" in reasons_for(f"billing@acme-logistics.{tld}")
+
+
+def test_more_cyrillic_and_greek_confusables() -> None:
+    assert "lookalike of brightleaf-clinics.example" in reasons_for(
+        "billing@brigһtleaf-ϲliniϲs.example"  # Cyrillic һ, Greek lunate sigma ϲ x2
+    )
+
+
+def test_free_mail_with_a_trailing_dot() -> None:
+    assert reasons_for("acme.billing@gmail.com.")[-1] == risk.FREE_MAIL_MENTIONS_ORG

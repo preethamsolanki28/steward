@@ -24,7 +24,7 @@ import re
 import unicodedata
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from email.utils import parseaddr
+from email.utils import getaddresses
 from encodings import idna
 from typing import Any, Literal
 
@@ -41,6 +41,12 @@ MAX_RECIPIENTS = 3
 # Bare placeholders whose brackets the model dropped (T2.5): "PERSON_3", "ORG 1". "⟦ORG_1⟧"
 # (a neutralized placeholder echoed back) also matches, because ⟦ is not a word character.
 BARE = re.compile(r"\b(?:PERSON|ORG|EMAIL|DOMAIN|PHONE|ACCOUNT|MONEY)[_ ]\d+\b")
+# Recipients are lower-cased when normalized, so inside `to` the bare form matches any case
+# ("rahul.verma@domain_1" was "rahul.verma@DOMAIN_1").
+BARE_ANY_CASE = re.compile(BARE.pattern, re.IGNORECASE)
+# A plain addr-spec: no whitespace (Unicode line separators included), quotes, comments, angle
+# brackets, commas, semicolons, colons or square brackets. Only these are normalized.
+_ADDR_SPEC = re.compile(r'[^\s"(),:;<>@\[\]\\]+@[^\s"(),:;<>@\[\]\\]+')
 
 # Confusable folding (docs/02 §7a): Cyrillic and Greek lookalikes of Latin letters, then
 # rn -> m, 0 -> o, 1 -> l. Nothing else.
@@ -72,6 +78,13 @@ _CONFUSABLES = str.maketrans(
         "τ": "t",
         "υ": "u",
         "χ": "x",
+        "ϲ": "c",
+        "ϳ": "j",
+        # more Cyrillic
+        "һ": "h",
+        "ԛ": "q",
+        "ԝ": "w",
+        "ү": "y",
     }
 )
 
@@ -132,11 +145,15 @@ def context(trusted: Iterable[tuple[str, str | None]], owner_email: str) -> Risk
 
 
 def normalize_recipients(to: str | Sequence[Any] | None) -> list[str]:
-    """`to` as the model sent it -> distinct recipients, in order.
+    """`to` as the model sent it -> distinct recipients, in order. Idempotent: the list it
+    returns normalizes to itself, so the recipients that are scored are exactly the ones stored
+    in args_json and sent.
 
-    A string is one recipient, unless it is a JSON list of strings (models sometimes send
-    '["a@x.example"]'). Real addresses ("Name <a@x>" or "a@x") become the lower-case address;
-    anything else (e.g. an unresolved "[[EMAIL_1]]") is kept as written so R0/R1 still see it."""
+    A string may be a JSON list of strings ('["a@x.example"]'), one address, "Name <a@x>", or
+    several addresses separated by commas or semicolons. Each address becomes its lower-case
+    addr-spec. A string that does not parse cleanly into plain addresses (e.g. an unresolved
+    "[[EMAIL_1]]", a stray quote, or a "(comment)" that could hide another address) is kept
+    whole, as written: it is never a trusted contact, so it always scores High."""
     if to is None:
         return []
     items: list[Any]
@@ -154,30 +171,52 @@ def normalize_recipients(to: str | Sequence[Any] | None) -> list[str]:
         items = list(to)
     out: list[str] = []
     for item in items:
-        raw = str(item).strip()
-        if not raw:
-            continue
-        addr = parseaddr(raw)[1]
-        value = addr.strip().lower() if "@" in addr else raw
-        if value not in out:
-            out.append(value)
+        for value in _split_recipients(str(item).strip()):
+            if value and value not in out:
+                out.append(value)
     return out
+
+
+def _canonical(addr: str) -> str | None:
+    addr = addr.strip()
+    return addr.lower() if _ADDR_SPEC.fullmatch(addr) else None
+
+
+def _split_recipients(raw: str) -> list[str]:
+    if not raw:
+        return []
+    plain = _canonical(raw)
+    if plain:
+        return [plain]
+    if "(" in raw or ")" in raw:  # RFC 5322 comments would be silently dropped by the parser
+        return [raw]
+    pairs = getaddresses([raw.replace(";", ",")])
+    addrs = [_canonical(addr) for _, addr in pairs]
+    if addrs and all(addrs):
+        return [a for a in addrs if a]
+    return [raw]
 
 
 def _domain(email: str) -> str:
     return email.rsplit("@", 1)[1].strip().lower().rstrip(".")
 
 
+def _label_to_unicode(label: str) -> str:
+    if not label.startswith("xn--"):
+        return label
+    try:
+        return idna.ToUnicode(label)
+    except UnicodeError:
+        # encodings.idna is IDNA2003 and refuses IDNA2008 labels with ß or ς; decode the raw
+        # punycode instead (RFC 3492, stdlib codec).
+        try:
+            return label[4:].encode("ascii").decode("punycode")
+        except (UnicodeError, ValueError):
+            return label
+
+
 def _to_unicode(host: str) -> str:
-    labels = []
-    for label in host.split("."):
-        if label.startswith("xn--"):
-            try:
-                label = idna.ToUnicode(label)
-            except UnicodeError:
-                pass
-        labels.append(label)
-    return ".".join(labels)
+    return ".".join(_label_to_unicode(label) for label in host.split("."))
 
 
 def fold(text: str) -> str:
@@ -224,8 +263,8 @@ def lookalike_of(host: str, trusted_domain: str) -> bool:
     fc, tc = fold(raw_c), fold(raw_t)
     if not fc or not tc:
         return False
-    if fc == tc:  # confusable spelling, or the same label under another TLD
-        return raw_c != raw_t or fold(tld_c) != fold(tld_t)
+    if fc == tc:  # confusable spelling, or the same label under another (raw) TLD
+        return raw_c != raw_t or tld_c != tld_t
     if 1 <= osa_distance(fc, tc) <= (1 if len(tc) < 8 else 2):
         return True
     core = tc.replace("-", "")
@@ -267,6 +306,8 @@ def r0_unresolved_placeholder(args: Mapping[str, Any]) -> list[str]:
     for text in _strings(args):
         if TOLERANT.search(text) or BARE.search(text):
             return [UNRESOLVED_PLACEHOLDER]
+    if any(BARE_ANY_CASE.search(text) for text in _strings(args.get("to"))):
+        return [UNRESOLVED_PLACEHOLDER]
     return []
 
 
@@ -286,6 +327,7 @@ def r1_untrusted_recipients(rcpts: Sequence[str], ctx: RiskContext) -> list[str]
         if "@" not in addr:
             continue
         local, domain = addr.rsplit("@", 1)
+        domain = domain.rstrip(".")
         if domain in FREE_MAIL:
             if any(n in _alnum(local) for n in needles):
                 reasons.append(FREE_MAIL_MENTIONS_ORG)
@@ -305,15 +347,15 @@ def overwrite(tool: str, path_exists: bool) -> list[str]:
 def assess(
     tool: str, args: Mapping[str, Any], ctx: RiskContext, path_exists: bool = False
 ) -> tuple[Risk, list[str]]:
-    """Risk and reasons for a mail_send / files_write action. Every rule means High."""
+    """Risk and reasons for a mail_send / files_write action. Every rule means High. Reasons are
+    not deduplicated across recipients: each untrusted recipient keeps its own reasons."""
     reasons = r0_unresolved_placeholder(args)
     if tool == "mail_send":
         rcpts = recipients(args, ctx)
         reasons += r1_untrusted_recipients(rcpts, ctx)
         reasons += r3_too_many_recipients(rcpts)
     reasons += overwrite(tool, path_exists)
-    deduped = list(dict.fromkeys(reasons))
-    return ("high" if deduped else "low"), deduped
+    return ("high" if reasons else "low"), reasons
 
 
 def approvable(reasons: Sequence[str]) -> bool:
