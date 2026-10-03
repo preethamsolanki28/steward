@@ -160,6 +160,50 @@ def test_negative_rules_leave_text_untouched(shield: Shield, text: str) -> None:
     assert text_of(shield, text) == text
 
 
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        # pre-M4 fix: an amount followed by a comma was not masked (lookahead rejected ",")
+        ("$4,800, 13 days overdue", "[[MONEY_1]], 13 days overdue"),
+        ("Please pay $2,150, thanks", "Please pay [[MONEY_1]], thanks"),
+        ("₹3,25,000, due soon", "[[MONEY_1]], due soon"),
+        ("USD 4800, then", "[[MONEY_1]], then"),
+        ("$6,500,", "[[MONEY_1]],"),
+        ("$4,800. Thanks", "[[MONEY_1]]. Thanks"),
+        ("($4,800)", "([[MONEY_1]])"),
+        (
+            "INV-0042 for $4,800, due 2026-09-20, 13 days overdue",
+            "INV-0042 for [[MONEY_1]], due 2026-09-20, 13 days overdue",
+        ),
+    ],
+)
+def test_amount_followed_by_punctuation_is_masked(
+    shield: Shield, text: str, expected: str
+) -> None:
+    assert text_of(shield, text) == expected
+
+
+@pytest.mark.parametrize(
+    "text, amount",
+    [("$12,500,000 total", "$12,500,000"), ("₹1,25,00,000 total", "₹1,25,00,000")],
+)
+def test_digit_grouping_is_never_cut_short(shield: Shield, text: str, amount: str) -> None:
+    out = text_of(shield, text)
+    assert out == "[[MONEY_1]] total"
+    assert shield.vault.value("[[MONEY_1]]") == amount
+
+
+def test_unseen_amount_with_a_comma_never_reaches_the_model(shield: Shield) -> None:
+    # Before the fix this amount left in clear: not masked, and not yet in the vault for the
+    # leak check to catch.
+    out = shield.outbound(
+        {"messages": [{"role": "user", "content": "The new quote is $7,350, valid for 30 days."}]}
+    )
+    sent = json.dumps(out.request, ensure_ascii=False)
+    assert "7,350" not in sent and out.leaks == []
+    assert "[[MONEY_" in sent and "30 days" in sent
+
+
 def test_card_requires_luhn(shield: Shield) -> None:
     assert text_of(shield, "ref 1234 5678 9012 3456") == "ref 1234 5678 9012 3456"
 

@@ -124,7 +124,7 @@ _GSTIN = re.compile(r"\b\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]\b")
 _PAN = re.compile(r"\b[A-Z]{5}\d{4}[A-Z]\b")
 _AMOUNT = r"\d{1,3}(?:,\d{2,3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?"
 _MONEY = re.compile(
-    rf"(?:₹|\bINR\b\s?|\bRs\.?\s?|\bUSD\b\s?|\bUS\$\s?|\$)\s?(?:{_AMOUNT})(?![\d,])"
+    rf"(?:₹|\bINR\b\s?|\bRs\.?\s?|\bUSD\b\s?|\bUS\$\s?|\$)\s?(?:{_AMOUNT})(?!\d|,\d)"
     rf"|(?<![\w.,$₹])(?:{_AMOUNT})\s?(?:INR|USD|rupees?|dollars?|lakhs?|crores?)\b",
     re.I,
 )
