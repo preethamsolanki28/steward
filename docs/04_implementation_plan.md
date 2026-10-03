@@ -449,9 +449,10 @@ Tick a box only after you have seen it pass yourself. Runtime items are checked 
 - [x] web shell renders 4 routes at desktop and 375px
 
 ### M1
-- [x] `/api/chat "Chase the Acme invoice"` → agent calls files_read + mail_search and returns a draft
+- [ ] `/api/chat "Chase the Acme invoice"` → agent calls files_read + mail_search and returns a draft
   - Check: `curl -s -X POST http://127.0.0.1:8787/api/chat -H 'Content-Type: application/json' -H 'X-Steward-Client: web' -d '{"message":"Chase the Acme invoice"}'`, then `curl -s 'http://127.0.0.1:8787/api/activity?after_id=0'` shows `tool_call` rows for files_read and mail_search.
   - 2026-10-03 (after T3.4 shipped `/api/activity`): live run showed `tool_call` rows `mcp__steward__files_read` ×2, `mcp__steward__mail_search`, `mcp__steward__mail_read`, `mcp__steward__mail_send`; Super reads the thread in 8/10 harness runs (docs/02 §12, DG-1 after T3.1).
+  - Unticked 2026-10-03: that run and the 8/10 were on a long-lived DB. On a fresh `make demo-reset` Super calls `mail_search` in 1/10 runs (docs/02 §12, pre-M4 reliability check), so this check does not hold reliably on the demo state.
 - [x] `make brief-now` saves a brief containing a Tavily result
   - Check: `curl -s http://127.0.0.1:8787/api/briefs/latest`.
 - [x] DG-2 path proven (learned memory applied in a new conversation, or a PUT /api/memory edit applied in the next new conversation)
