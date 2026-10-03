@@ -316,7 +316,7 @@ How to tick:
 
 - [x] **T4.1** — `lib/api.ts` (X-Steward-Client header) + `usePoll` + health pill + nav badge — E2 — 2h
   - The health pill shows Hermes · Token Factory · Tavily · mail mode, from `/api/health`. The Approvals Badge shows the pending count. Network errors show as a sonner toast.
-- [ ] **T4.2** — Chat screen + BriefCard + ActivityRail + error/timeout cards — E2 — 10h
+- [x] **T4.2** — Chat screen + BriefCard + ActivityRail + error/timeout cards — E2 — 10h
   - Layout: conversation list + "New chat"; thread + composer.
   - **Today's brief** card, pinned at the top and collapsible:
     - Shows "Ran by schedule at 08:00 IST" or the actual run time from the job status.

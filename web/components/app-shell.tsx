@@ -172,7 +172,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
         <div className="flex min-w-0 flex-1 flex-col">
           {/* <768px: top bar with the same nav in a left Sheet */}
-          <header className="flex items-center gap-2 border-b border-border bg-card px-2 md:hidden">
+          <header className="flex h-12 items-center gap-2 border-b border-border bg-card px-2 md:hidden">
             <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
               <SheetTrigger asChild>
                 <Button
