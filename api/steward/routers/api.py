@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from steward import db, hermes_client, jobs, memory_watch
 from steward import health as health_probe
 from steward.config import get_settings
+from steward.gate import executor
 from steward.seed import atomic_write
 from steward.shield import Shield
 
@@ -309,6 +310,42 @@ LEDGER_FIELDS = (
     "status",
 )
 IST = timezone(timedelta(hours=5, minutes=30))
+
+
+# --- Approval Gate (docs/02 §6, §7a; docs/04 T3.3) -------------------------------------------
+
+
+class ApproveIn(BaseModel):
+    confirm_high: bool = False
+
+
+def _decision(outcome: executor.Outcome) -> JSONResponse | dict[str, Any]:
+    """200 -> {action}. 404 -> {detail}. 409 -> {detail, action}: the row as it now stands, so
+    the UI can tell "needs confirm" from "already decided" or "unresolved placeholder"."""
+    if outcome.status == 200:
+        return {"action": outcome.action}
+    content: dict[str, Any] = {"detail": outcome.detail}
+    if outcome.action is not None:
+        content["action"] = outcome.action
+    return JSONResponse(status_code=outcome.status, content=content)
+
+
+@router.get("/actions")
+async def list_actions(status: Literal["pending", "all"] = "pending") -> list[dict[str, Any]]:
+    return await db.run(lambda conn: executor.list_actions(conn, status))
+
+
+@router.post("/actions/{action_id}/approve", response_model=None)
+async def approve_action(
+    action_id: int, payload: ApproveIn | None = None
+) -> JSONResponse | dict[str, Any]:
+    confirm_high = bool(payload and payload.confirm_high)
+    return _decision(await executor.approve(action_id, confirm_high))
+
+
+@router.post("/actions/{action_id}/reject", response_model=None)
+async def reject_action(action_id: int) -> JSONResponse | dict[str, Any]:
+    return _decision(await executor.reject_action(action_id))
 
 
 @router.get("/ledger")

@@ -4,7 +4,7 @@ Every insert also writes its audit_events row in the same transaction:
 - status 'blocked' -> policy_block, "Blocked: identifier would have left the Mac"
 - llm rows         -> egress, "<model display name> · N identifiers masked"
 - web rows         -> egress, "Tavily search"
-- mail rows        -> egress, "Mail sent"
+- mail rows        -> egress, "Mail sent" (or "Mail send error" when the SMTP attempt failed)
 The redacted request/response stored here is the ONLY place a body is kept. Nothing is logged.
 """
 
@@ -78,6 +78,7 @@ def insert(
         )
     elif channel == "web":
         db.audit(conn, "egress", "Tavily search", ref_table="egress_events", ref_id=row_id)
-    else:
-        db.audit(conn, "egress", "Mail sent", ref_table="egress_events", ref_id=row_id)
+    else:  # mail: an SMTP attempt that failed must not read "Mail sent"
+        summary = "Mail sent" if status == "ok" else "Mail send error"
+        db.audit(conn, "egress", summary, ref_table="egress_events", ref_id=row_id)
     return row_id

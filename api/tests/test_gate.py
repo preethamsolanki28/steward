@@ -235,3 +235,296 @@ def test_files_write_through_a_symlink_queues_nothing(client: TestClient, tmp_pa
 def test_files_write_content_cap(client: TestClient) -> None:
     ok, out = call(client, "files_write", path="notes/big.md", content="x" * (256 * 1024 + 1))
     assert not ok and "content too large" in out
+
+
+# --- T3.3: approve / reject / execute -------------------------------------------------------
+
+MESSAGE_ID = "<steward-action-{}@rao-consulting.example>"
+
+
+def queue(client: TestClient, tool: str = "mail_send", **args: Any) -> int:
+    ok, out = call(client, tool, **(args or LEGIT))
+    assert ok, out
+    return int(out["action_id"])
+
+
+def approve(client: TestClient, aid: int, body: Any = None, **headers: str):
+    kwargs: dict[str, Any] = {"headers": {**WEB, **headers}}
+    if body is not None:
+        kwargs["json"] = body
+    return client.post(f"/api/actions/{aid}/approve", **kwargs)
+
+
+def reject(client: TestClient, aid: int):
+    return client.post(f"/api/actions/{aid}/reject", headers=WEB)
+
+
+def test_legit_approve_sends_exactly_once_as_previewed(
+    client: TestClient, redirect: type[FakeSMTP]
+) -> None:
+    aid = queue(client)
+    r = approve(client, aid, {})
+    assert r.status_code == 200, r.text
+    a = r.json()["action"]
+    assert (a["status"], a["result"], a["risk"], a["risk_reasons"]) == ("executed", None, "low", [])
+    assert a["decided_at"] and a["args_json"] == action(aid)["args_json"]
+    (msg,) = redirect.sent
+    assert redirect.attempts == 1
+    assert msg["Message-ID"] == MESSAGE_ID.format(aid)
+    assert msg["To"] == "team-inbox@team.example"
+    assert msg["Subject"] == f"[Steward demo → {RAHUL}] {LEGIT['subject']}"
+    assert msg.get_content().rstrip("\n") == LEGIT["body"]
+    (stored,) = sent_mail()
+    assert (stored["from_email"], json.loads(stored["to_emails"])) == (
+        "maya@rao-consulting.example",
+        [RAHUL],
+    )
+    assert (stored["subject"], stored["body"]) == (LEGIT["subject"], LEGIT["body"])
+    (eg,) = mail_egress()
+    assert (eg["status"], eg["destination"], eg["model"]) == ("ok", "smtp.example", None)
+    kinds = [(e["kind"], e["summary"]) for e in audit() if e["kind"] != "tool_call"]
+    assert kinds == [
+        ("action_created", "mail_send → queued"),
+        ("action_decided", f"action #{aid} approved"),
+        ("egress", "Mail sent"),
+        ("action_executed", "mail_send → sent"),
+    ]
+    decided = audit("action_decided")[0]
+    assert json.loads(decided["detail"]) == {
+        "risk": "low",
+        "risk_reasons": [],
+        "confirm_high": False,
+    }
+
+
+def test_mail_ledger_row_is_stored_redacted_and_readable_locally(
+    client: TestClient, redirect: type[FakeSMTP]
+) -> None:
+    approve(client, queue(client), {})
+    (eg,) = mail_egress()
+    stored = eg["request_redacted"]
+    for raw in ("Rahul", "rahul.verma", "acme-logistics", "4,800"):
+        assert raw not in stored, raw
+    detail = client.get(f"/api/ledger/{eg['id']}").json()
+    assert RAHUL in detail["request_local"] and "$4,800" in detail["request_local"]
+    assert MESSAGE_ID.format(1)[1:-1] in detail["request_local"]
+
+
+def test_without_redirect_the_send_stays_in_the_demo_mailbox(
+    client: TestClient, fake_smtp: type[FakeSMTP]
+) -> None:
+    aid = queue(client)
+    a = approve(client, aid).json()["action"]  # no body at all
+    assert (a["status"], a["result"]) == ("executed", None)
+    assert fake_smtp.attempts == 0 and mail_egress() == [] and len(sent_mail()) == 1
+    assert audit("action_executed")[0]["summary"] == "mail_send → sent (demo mailbox only)"
+
+
+def test_bec_needs_confirm_then_reject_sends_nothing(
+    client: TestClient, redirect: type[FakeSMTP]
+) -> None:
+    aid = queue(client, **BEC)
+    r = approve(client, aid, {})
+    assert r.status_code == 409
+    body = r.json()
+    assert body["detail"] == "High-risk action needs confirm_high"
+    assert body["action"]["status"] == "pending"
+    assert body["action"]["risk_reasons"] == [
+        f"{BEC_TO} is not a trusted contact",
+        "lookalike of acme-logistics.example",
+    ]
+    r = reject(client, aid)
+    assert r.status_code == 200 and r.json()["action"]["status"] == "rejected"
+    assert r.json()["action"]["decided_at"]
+    assert redirect.attempts == 0 and sent_mail() == [] and mail_egress() == []
+    assert audit("action_executed") == []
+    assert [a["summary"] for a in audit("action_decided")] == [f"action #{aid} rejected"]
+    for again in (approve(client, aid, {"confirm_high": True}), reject(client, aid)):
+        assert again.status_code == 409 and again.json()["detail"] == "Action already decided"
+    assert redirect.attempts == 0 and action(aid)["status"] == "rejected"
+
+
+def test_confirmed_high_risk_is_the_documented_human_override(
+    client: TestClient, redirect: type[FakeSMTP]
+) -> None:
+    aid = queue(client, **BEC)
+    a = approve(client, aid, {"confirm_high": True}).json()["action"]
+    assert a["status"] == "executed" and redirect.attempts == 1
+    assert json.loads(audit("action_decided")[0]["detail"])["confirm_high"] is True
+
+
+def test_unresolved_placeholder_can_never_be_approved(
+    client: TestClient, redirect: type[FakeSMTP]
+) -> None:
+    aid = queue(client, **{**LEGIT, "body": "Dear [[PERSON_1]], please pay [[MONEY_1]]."})
+    for body in ({}, {"confirm_high": True}):
+        r = approve(client, aid, body)
+        assert r.status_code == 409 and r.json()["detail"] == "unresolved placeholder"
+    assert action(aid)["status"] == "pending" and redirect.attempts == 0
+    assert audit("action_decided") == []
+    assert reject(client, aid).status_code == 200
+
+
+def test_second_approve_is_refused_and_never_resends(
+    client: TestClient, redirect: type[FakeSMTP]
+) -> None:
+    aid = queue(client)
+    assert approve(client, aid, {}).status_code == 200
+    r = approve(client, aid, {"confirm_high": True})
+    assert r.status_code == 409 and r.json()["detail"] == "Action already decided"
+    assert r.json()["action"]["status"] == "executed"
+    assert redirect.attempts == 1 and len(sent_mail()) == 1 and len(mail_egress()) == 1
+    assert len(audit("action_decided")) == 1 and len(audit("action_executed")) == 1
+
+
+def test_recompute_at_approve_files_write_now_overwrites(client: TestClient) -> None:
+    aid = queue(client, "files_write", path="notes/plan.md", content="queued content\n")
+    assert action(aid)["risk"] == "low"
+    target = workspace() / "notes" / "plan.md"
+    target.parent.mkdir(parents=True)
+    target.write_text("someone else's file\n")
+    r = approve(client, aid, {})
+    assert r.status_code == 409 and r.json()["detail"] == "Risk is now High; confirm to approve"
+    assert r.json()["action"]["risk_reasons"] == [risk.OVERWRITES]
+    listed = client.get("/api/actions").json()
+    assert [(x["id"], x["risk"], x["status"]) for x in listed] == [(aid, "high", "pending")]
+    assert target.read_text() == "someone else's file\n"
+    a = approve(client, aid, {"confirm_high": True}).json()["action"]
+    assert a["status"] == "executed" and target.read_text() == "queued content\n"
+    assert audit("action_executed")[0]["summary"] == "files_write → written"
+
+
+def test_recompute_at_approve_recipient_no_longer_trusted(
+    client: TestClient, redirect: type[FakeSMTP]
+) -> None:
+    aid = queue(client)
+    db.with_conn(lambda c: c.execute("UPDATE contacts SET trusted = 0 WHERE email = ?", (RAHUL,)))
+    r = approve(client, aid, {})
+    assert r.status_code == 409 and r.json()["detail"] == "Risk is now High; confirm to approve"
+    assert r.json()["action"]["risk_reasons"] == [f"{RAHUL} is not a trusted contact"]
+    assert redirect.attempts == 0 and action(aid)["risk"] == "high"
+
+
+def test_recompute_can_also_lower_the_risk(client: TestClient, redirect: type[FakeSMTP]) -> None:
+    priya = "priya.nair@nair-ca.example"
+    aid = queue(client, **{**LEGIT, "to": [priya]})
+    assert action(aid)["risk"] == "high"
+    db.with_conn(lambda c: c.execute("UPDATE contacts SET trusted = 1 WHERE email = ?", (priya,)))
+    a = approve(client, aid, {}).json()["action"]
+    assert (a["status"], a["risk"], a["risk_reasons"]) == ("executed", "low", [])
+
+
+def test_smtp_timeout_is_delivery_unknown_and_never_retried(
+    client: TestClient, redirect: type[FakeSMTP]
+) -> None:
+    redirect.fail = TimeoutError("timed out")
+    aid = queue(client)
+    r = approve(client, aid, {})
+    assert r.status_code == 200
+    a = r.json()["action"]
+    assert (a["status"], a["result"]) == ("failed", "delivery unknown — check Sent before retrying")
+    assert redirect.attempts == 1 and redirect.sent == []
+    assert approve(client, aid, {"confirm_high": True}).status_code == 409
+    assert redirect.attempts == 1
+    (eg,) = mail_egress()
+    assert eg["status"] == "error"
+    summaries = [e["summary"] for e in audit() if e["kind"] in ("egress", "action_executed")]
+    assert summaries == ["Mail send error", "mail_send → delivery unknown"]
+    assert audit("action_executed")[0]["detail"] == a["result"]
+
+
+def test_smtp_refusal_fails_without_leaking_the_password(
+    client: TestClient, redirect: type[FakeSMTP]
+) -> None:
+    import smtplib
+
+    redirect.fail = smtplib.SMTPAuthenticationError(535, b"5.7.8 auth failed")
+    aid = queue(client)
+    a = approve(client, aid, {}).json()["action"]
+    assert a["status"] == "failed" and a["result"].startswith("SMTP error: SMTPAuthenticationError")
+    dump = json.dumps(
+        [
+            q(sql)
+            for sql in (
+                "SELECT * FROM actions",
+                "SELECT * FROM audit_events",
+                "SELECT * FROM egress_events",
+            )
+        ]
+    )
+    assert "app-password" not in dump
+
+
+def test_smtp_not_configured_fails_cleanly(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DEMO_MAIL_REDIRECT", "team-inbox@team.example")  # but no SMTP_HOST
+    aid = queue(client)
+    a = approve(client, aid, {}).json()["action"]
+    assert (a["status"], a["result"]) == ("failed", "SMTP not configured: SMTP_HOST is not set")
+    assert mail_egress() == []
+
+
+def test_agent_host_and_missing_header_cannot_decide(client: TestClient) -> None:
+    aid = queue(client)
+    for path in (f"/api/actions/{aid}/approve", f"/api/actions/{aid}/reject"):
+        r = client.post(path, json={}, headers={**WEB, "Host": "steward-api:8787"})
+        assert r.status_code == 403
+        assert client.post(path, json={}).status_code == 403
+    assert client.get("/api/actions", headers={"Host": "steward-api:8787"}).status_code == 403
+    assert action(aid)["status"] == "pending"
+    assert approve(client, 9999, {}).status_code == 404
+    assert reject(client, 9999).json() == {"detail": "action not found"}
+
+
+def test_list_actions(client: TestClient) -> None:
+    first, second = queue(client), queue(client, **BEC)
+    third = queue(client)
+    reject(client, third)
+    pending = client.get("/api/actions").json()
+    assert [a["id"] for a in pending] == [first, second]
+    assert pending[1]["risk_reasons"][1] == "lookalike of acme-logistics.example"
+    assert [a["id"] for a in client.get("/api/actions?status=all").json()] == [third, second, first]
+    assert client.get("/api/actions?status=nope").status_code == 422
+    assert set(pending[0]) == {
+        "id",
+        "created_at",
+        "tool",
+        "args_json",
+        "preview",
+        "risk",
+        "risk_reasons",
+        "status",
+        "decided_at",
+        "result",
+    }
+
+
+def test_files_write_refused_at_approve_when_path_became_unsafe(
+    client: TestClient, tmp_path: Path
+) -> None:
+    aid = queue(client, "files_write", path="drafts/a.md", content="x")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (workspace() / "drafts").symlink_to(outside)
+    r = approve(client, aid, {"confirm_high": True})
+    assert r.status_code == 409 and r.json()["detail"] == "write refused: symlinks are not allowed"
+    assert action(aid)["status"] == "pending" and list(outside.iterdir()) == []
+
+
+def test_execute_time_safe_path_recheck(tmp_path: Path) -> None:
+    # The window between claim and write: the executor checks safe_path again.
+    from steward.gate import executor
+
+    ws = workspace()
+    ws.mkdir(parents=True, exist_ok=True)
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    (ws / "late").symlink_to(outside)
+    status, result, summary = executor._write_file({"path": "late/x.md", "content": "x"})
+    assert (status, result, summary) == (
+        "failed",
+        "write refused: symlinks are not allowed",
+        "files_write → failed",
+    )
+    assert list(outside.iterdir()) == []

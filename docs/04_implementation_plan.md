@@ -293,7 +293,7 @@ How to tick:
     - A trusted label plus extra words, e.g. `acme-logistics-payments.example`.
   - For free-mail addresses, R1 adds "local part mentions trusted org".
   - `OWNER_EMAIL` is excluded from all rules. Tests go in `tests/test_risk.py`.
-- [ ] **T3.3** — Executor + `/api/actions` endpoints: at-most-once claim, risk recompute + 409, Message-ID, "delivery unknown", mail egress row, safe_path for writes — E1 — 3.5h
+- [x] **T3.3** — Executor + `/api/actions` endpoints: at-most-once claim, risk recompute + 409, Message-ID, "delivery unknown", mail egress row, safe_path for writes — E1 — 3.5h
   - Claim: `UPDATE actions SET status='approved', decided_at=? WHERE id=? AND status='pending'`; proceed only if rowcount==1.
   - Recompute risk at approve time. If the action is now High and `confirm_high` isn't set → 409.
   - Sending:
