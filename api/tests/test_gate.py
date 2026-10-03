@@ -521,7 +521,7 @@ def test_execute_time_safe_path_recheck(tmp_path: Path) -> None:
     outside = tmp_path / "elsewhere"
     outside.mkdir()
     (ws / "late").symlink_to(outside)
-    status, result, summary = executor._write_file({"path": "late/x.md", "content": "x"})
+    status, result, summary = executor._write_file({"path": "late/x.md", "content": "x"}, False)
     assert (status, result, summary) == (
         "failed",
         "write refused: symlinks are not allowed",
@@ -547,3 +547,94 @@ def test_crlf_hidden_in_a_json_list_recipient_queues_nothing(client: TestClient)
     ok, out = call(client, "mail_send", to=to, subject="s", body="b")
     assert not ok and "single-line" in out
     assert q("SELECT COUNT(*) AS n FROM actions")[0]["n"] == 0
+
+
+# --- M3 review regressions -------------------------------------------------------------------
+
+
+def test_two_low_writes_to_one_new_path_never_silently_overwrite(client: TestClient) -> None:
+    import anyio
+
+    from steward.gate import executor
+
+    first = queue(client, "files_write", path="notes/plan.md", content="version A\n")
+    second = queue(client, "files_write", path="notes/plan.md", content="version B\n")
+    claimed: list[dict[str, Any]] = []
+    for aid in (first, second):  # both claimed while the file does not exist yet: both Low
+        outcome = db.with_conn(lambda c, a=aid: executor.claim_approval(c, a, False))
+        assert outcome.status == 200 and outcome.action and outcome.action["risk"] == "low"
+        claimed.append(outcome.action)
+    done: list[dict[str, Any]] = []
+
+    async def run(a: dict[str, Any]) -> None:
+        done.append(await executor.execute(a))
+
+    async def both() -> None:
+        async with anyio.create_task_group() as tg:
+            for a in claimed:
+                tg.start_soon(run, a)
+
+    anyio.run(both)
+    assert sorted(d["status"] for d in done) == ["executed", "failed"]
+    loser = next(d for d in done if d["status"] == "failed")
+    assert loser["result"] == (
+        "write refused: the file appeared after approval; queue it again to overwrite"
+    )
+    winner = next(d for d in done if d["status"] == "executed")
+    expected = json.loads(winner["args_json"])["content"]
+    assert (workspace() / "notes" / "plan.md").read_text() == expected
+
+
+def test_error_after_a_real_send_still_finishes_the_row(
+    client: TestClient, redirect: type[FakeSMTP], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from steward.gate import executor
+
+    def broken_insert(*args: Any, **kwargs: Any) -> int:
+        raise RuntimeError("ledger down")
+
+    monkeypatch.setattr(executor.store, "insert", broken_insert)
+    aid = queue(client)
+    r = approve(client, aid, {})
+    assert r.status_code == 200 and r.json()["action"]["status"] == "executed"
+    assert redirect.attempts == 1 and action(aid)["status"] == "executed"
+    assert [a["summary"] for a in audit("action_executed")] == ["mail_send → sent"]
+
+
+def test_error_before_any_send_fails_the_row_cleanly(
+    client: TestClient, redirect: type[FakeSMTP], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from steward.gate import executor
+
+    def broken(*args: Any, **kwargs: Any) -> int:
+        raise RuntimeError("disk full")
+
+    monkeypatch.setattr(executor, "_store_sent", broken)
+    aid = queue(client)
+    a = approve(client, aid, {}).json()["action"]
+    assert (a["status"], a["result"]) == ("failed", "execution error: RuntimeError")
+    assert redirect.attempts == 0
+
+
+def test_mail_ledger_row_survives_a_shield_error_without_storing_the_body(
+    client: TestClient, redirect: type[FakeSMTP], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from steward.gate import executor
+
+    def broken(self: Any, request: Any) -> Any:
+        raise RuntimeError("shield down")
+
+    monkeypatch.setattr(executor.Shield, "outbound", broken)
+    aid = queue(client)
+    assert approve(client, aid, {}).json()["action"]["status"] == "executed"
+    (eg,) = mail_egress()
+    assert json.loads(eg["request_redacted"]) == {
+        "message_id": MESSAGE_ID.format(aid),
+        "copy": "not stored (RuntimeError)",
+    }
+
+
+def test_failed_send_records_its_real_latency(client: TestClient, redirect: type[FakeSMTP]) -> None:
+    redirect.fail, redirect.delay = TimeoutError("timed out"), 0.05
+    approve(client, queue(client), {})
+    assert mail_egress()[0]["latency_ms"] >= 50

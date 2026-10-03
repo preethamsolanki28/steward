@@ -45,17 +45,23 @@ def isolated_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 class FakeSMTP:
-    """smtplib.SMTP stand-in: records every connection attempt and every accepted message.
-    `fail` makes send_message raise; `delay` makes it slow (for race tests)."""
+    """smtplib.SMTP / SMTP_SSL stand-in: records every connection, the TLS contexts it was
+    given, every send attempt and every accepted message. `fail` makes send_message raise;
+    `delay` makes it slow (for race tests)."""
 
     sent: list[EmailMessage] = []
     attempts: int = 0
+    contexts: list[object] = []
     fail: Exception | None = None
     delay: float = 0.0
     _lock = threading.Lock()
 
-    def __init__(self, host: str, port: int, timeout: float) -> None:
+    def __init__(
+        self, host: str, port: int, timeout: float | None = None, context: object = None
+    ) -> None:
         self.host, self.port, self.timeout = host, port, timeout
+        if context is not None:
+            FakeSMTP.contexts.append(context)
 
     def __enter__(self) -> "FakeSMTP":
         return self
@@ -63,8 +69,8 @@ class FakeSMTP:
     def __exit__(self, *exc: object) -> None:
         return None
 
-    def starttls(self) -> None:
-        return None
+    def starttls(self, context: object = None) -> None:
+        FakeSMTP.contexts.append(context)
 
     def login(self, user: str, password: str) -> None:
         return None
@@ -79,10 +85,17 @@ class FakeSMTP:
         with FakeSMTP._lock:
             FakeSMTP.sent.append(msg)
 
+    def quit(self) -> None:
+        return None
+
+    def close(self) -> None:
+        return None
+
 
 @pytest.fixture
 def fake_smtp(monkeypatch: pytest.MonkeyPatch) -> type[FakeSMTP]:
     FakeSMTP.sent, FakeSMTP.attempts, FakeSMTP.fail, FakeSMTP.delay = [], 0, None, 0.0
+    FakeSMTP.contexts = []
     monkeypatch.setattr(smtplib, "SMTP", FakeSMTP)
     monkeypatch.setattr(smtplib, "SMTP_SSL", FakeSMTP)
     monkeypatch.setenv("SMTP_HOST", "smtp.example")

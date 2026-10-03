@@ -22,6 +22,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
+import time
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -189,32 +191,39 @@ def _mail_egress(
 ) -> None:
     """egress_events(channel='mail') for an SMTP attempt. The stored copy goes through the
     Shield like every stored body (the real message went to DEMO_MAIL_REDIRECT); the local view
-    re-identifies it on read."""
+    re-identifies it on read. If the copy cannot be built, a row with only the Message-ID is
+    still written: every SMTP attempt leaves a ledger row."""
     s = get_settings()
     message = {
         "to": [s.demo_mail_redirect],
-        "subject": smtp.build_message(s, args["to"], args["subject"], "", message_id)["Subject"],
+        "subject": smtp.subject_for(args["to"], args["subject"]),
         "message_id": message_id,
         "body": args["body"],
     }
-    shield = Shield(conn)
+    try:
+        shield = Shield(conn)
 
-    def redacted(body: dict[str, Any]) -> dict[str, Any]:
-        out = shield.outbound(body)
-        return (out.blocked_request or out.request) if out.leaks else out.request
+        def redacted(body: dict[str, Any]) -> dict[str, Any]:
+            out = shield.outbound(body)
+            return (out.blocked_request or out.request) if out.leaks else out.request
 
+        request = redacted(message)
+        response = redacted({"result": result}) if result else None
+    except Exception as exc:  # never lose the row; never store an unredacted body
+        request = {"message_id": message_id, "copy": f"not stored ({type(exc).__name__})"}
+        response = None
     store.insert(
         conn,
         channel="mail",
         destination=s.smtp_host or "smtp",
         status=status,
-        request_redacted=redacted(message),
-        response_redacted=redacted({"result": result}) if result else None,
+        request_redacted=request,
+        response_redacted=response,
         latency_ms=latency_ms,
     )
 
 
-async def _execute_mail(action: dict[str, Any]) -> dict[str, Any]:
+async def _execute_mail(action: dict[str, Any], progress: dict[str, str]) -> dict[str, Any]:
     action_id = int(action["id"])
     args = json.loads(action["args_json"])
     if not smtp.enabled():
@@ -230,20 +239,25 @@ async def _execute_mail(action: dict[str, Any]) -> dict[str, Any]:
     await db.run(lambda conn: _store_sent(conn, args))
     message_id = MESSAGE_ID.format(id=action_id)
     egress: Literal["ok", "error"] | None = "error"
-    latency_ms = 0
     status: Literal["executed", "failed"] = "failed"
     result: str | None
+    progress["smtp"] = "attempted"
+    started = time.monotonic()
     try:
-        latency_ms = await smtp.send(args["to"], args["subject"], args["body"], message_id)
+        await smtp.send(args["to"], args["subject"], args["body"], message_id)
         egress, status, result, summary = "ok", "executed", None, "mail_send → sent"
+        progress["smtp"] = "sent"
     except smtp.DeliveryUnknown:
         result, summary = smtp.DELIVERY_UNKNOWN, "mail_send → delivery unknown"
     except smtp.SmtpError as exc:
         result, summary = str(exc), "mail_send → failed"
+        progress["smtp"] = "not sent"
     except smtp.SmtpNotConfigured as exc:
         egress, result, summary = None, f"SMTP not configured: {exc}", "mail_send → failed"
+        progress["smtp"] = "not sent"
     except Exception as exc:  # never retried; the class name only (no message body, no secret)
         result, summary = f"send error: {type(exc).__name__}", "mail_send → failed"
+    latency_ms = int((time.monotonic() - started) * 1000)
 
     def finish(conn: sqlite3.Connection) -> dict[str, Any]:
         if egress is not None:
@@ -253,34 +267,71 @@ async def _execute_mail(action: dict[str, Any]) -> dict[str, Any]:
     return await db.run(finish)
 
 
-def _write_file(args: dict[str, Any]) -> tuple[Literal["executed", "failed"], str | None, str]:
-    """Runs in a worker thread: safe_path again at execute time, then an atomic write."""
-    try:
-        _, target = actions.write_target(str(args["path"]))
-    except (files.UnsafePath, actions.InvalidAction) as exc:
-        return "failed", f"write refused: {exc}", "files_write → failed"
-    try:
-        seed.atomic_write(target, str(args["content"]))
-    except OSError as exc:
-        return "failed", f"write failed: {type(exc).__name__}", "files_write → failed"
+# One worker process: this lock makes "does the target exist?" + write atomic across
+# concurrently approved files_write actions.
+_WRITE_LOCK = threading.Lock()
+
+
+def _write_file(
+    args: dict[str, Any], allow_overwrite: bool
+) -> tuple[Literal["executed", "failed"], str | None, str]:
+    """Runs in a worker thread: safe_path again at execute time, then an atomic write. A file
+    that appeared after approval is not overwritten unless the overwrite was approved."""
+    with _WRITE_LOCK:
+        try:
+            _, target = actions.write_target(str(args["path"]))
+        except (files.UnsafePath, actions.InvalidAction) as exc:
+            return "failed", f"write refused: {exc}", "files_write → failed"
+        if target.exists() and not allow_overwrite:
+            return (
+                "failed",
+                "write refused: the file appeared after approval; queue it again to overwrite",
+                "files_write → failed",
+            )
+        try:
+            seed.atomic_write(target, str(args["content"]))
+        except OSError as exc:
+            return "failed", f"write failed: {type(exc).__name__}", "files_write → failed"
     return "executed", None, "files_write → written"
 
 
 async def _execute_write(action: dict[str, Any]) -> dict[str, Any]:
     args = json.loads(action["args_json"])
-    status, result, summary = await anyio.to_thread.run_sync(_write_file, args)
+    allow_overwrite = risk.OVERWRITES in (action.get("risk_reasons") or [])
+    status, result, summary = await anyio.to_thread.run_sync(_write_file, args, allow_overwrite)
+    return await db.run(lambda conn: _finish(conn, int(action["id"]), status, result, summary))
+
+
+async def _finish_after_error(
+    action: dict[str, Any], exc: BaseException, progress: dict[str, str]
+) -> dict[str, Any]:
+    """Something broke after the claim (e.g. the database while recording the result). The row
+    must not stay 'approved' forever: record what is known, in a fresh transaction."""
+    tool = action["tool"]
+    status: Literal["executed", "failed"] = "failed"
+    if progress.get("smtp") == "sent":
+        status, result, summary = "executed", None, "mail_send → sent"
+    elif progress.get("smtp") == "attempted":
+        result, summary = smtp.DELIVERY_UNKNOWN, "mail_send → delivery unknown"
+    else:
+        result, summary = f"execution error: {type(exc).__name__}", f"{tool} → failed"
     return await db.run(lambda conn: _finish(conn, int(action["id"]), status, result, summary))
 
 
 async def execute(action: dict[str, Any]) -> dict[str, Any]:
     """Run a claimed ('approved') action exactly once. Shielded from cancellation, so a client
-    that disconnects mid-send cannot leave the row half-finished."""
+    that disconnects mid-send cannot leave the row half-finished; any error after the claim
+    still ends in 'executed' or 'failed'."""
     done: dict[str, Any] | None = None
+    progress: dict[str, str] = {}
     with anyio.CancelScope(shield=True):
-        if action["tool"] == "mail_send":
-            done = await _execute_mail(action)
-        else:
-            done = await _execute_write(action)
+        try:
+            if action["tool"] == "mail_send":
+                done = await _execute_mail(action, progress)
+            else:
+                done = await _execute_write(action)
+        except Exception as exc:
+            done = await _finish_after_error(action, exc, progress)
     if done is None:  # a shielded scope is never cancelled; this cannot happen
         raise RuntimeError(f"action #{action['id']} did not finish")
     return done
