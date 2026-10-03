@@ -39,7 +39,10 @@ export async function api<T>(method: Method, path: string, body?: unknown): Prom
   let parsed: unknown;
   try {
     if (config) {
-      ({ status, body: parsed } = await fixtureFetch(method, path, body, config));
+      const res = await fixtureFetch(method, path, body, config);
+      status = res.status;
+      // Round-trip through JSON like a real response, so mock state is never shared by reference.
+      parsed = res.body === undefined ? null : (JSON.parse(JSON.stringify(res.body)) as unknown);
     } else {
       // Mutating routes need X-Steward-Client (docs/02 §8); a JSON body needs its Content-Type,
       // or FastAPI rejects it with 422.

@@ -457,3 +457,38 @@ async def ledger_detail(event_id: int) -> dict[str, Any]:
     if result is None:
         raise HTTPException(status_code=404, detail="ledger row not found")
     return result
+
+
+# --- System tab (T4.5): read-only settings and contacts ------------------------------------------
+
+ZDR_NOTE = "ZDR is an org-level setting in your Token Factory profile; Steward cannot verify it"
+
+
+@router.get("/settings")
+async def settings_view() -> dict[str, str]:
+    """What the proxy actually uses: the settings table first, then env (same as proxy._chain)."""
+    s = get_settings()
+
+    def load(conn: sqlite3.Connection) -> dict[str, str]:
+        effort = db.get_setting(conn, "reasoning_effort")
+        return {
+            "model_primary": db.get_setting(conn, "model_primary") or s.model_primary,
+            "model_fallback": db.get_setting(conn, "model_fallback") or s.model_fallback,
+            "reasoning_effort": s.reasoning_effort if effort is None else effort,
+            "mail_mode": db.get_setting(conn, "mail_mode") or s.mail_mode,
+            "shield": "on",
+            "zdr_note": ZDR_NOTE,
+        }
+
+    return await db.run(load)
+
+
+@router.get("/contacts")
+async def contacts() -> list[dict[str, Any]]:
+    return await db.run(
+        lambda conn: db.rows(
+            conn.execute(
+                "SELECT id, name, email, org, trusted, source, created_at FROM contacts ORDER BY id"
+            )
+        )
+    )

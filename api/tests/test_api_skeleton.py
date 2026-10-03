@@ -133,7 +133,7 @@ def test_dev_host_only_when_steward_dev(monkeypatch: pytest.MonkeyPatch) -> None
     with _client() as c:
         assert c.get("/api/settings", headers={"Host": "localhost:3000"}).status_code == 403
         monkeypatch.setenv("STEWARD_DEV", "1")
-        assert c.get("/api/settings", headers={"Host": "localhost:3000"}).status_code != 403
+        assert c.get("/api/settings", headers={"Host": "localhost:3000"}).status_code == 200
 
 
 def test_mutating_routes_need_client_header() -> None:

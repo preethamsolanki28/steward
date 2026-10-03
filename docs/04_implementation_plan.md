@@ -362,7 +362,8 @@ How to tick:
   - By default the diff shows only the last user/tool/assistant messages and the tool-call arguments. The system prompt sits behind "Show full payload" (preformatted).
   - Placeholders render as teal PlaceholderChips via `\[\[[A-Z]+_\d+\]\]`.
   - Empty state: "Nothing has been sent to an AI or search provider yet." On mobile the two columns stack.
-- [ ] **T4.5** — Memory & Skills screen (entry editors, skills cards, System tab) — E2 — 4h
+- [x] **T4.5** — Memory & Skills screen (entry editors, skills cards, System tab) — E2 — 4h
+  - Also built here (2026-10-03): the documented read-only endpoints `GET /api/settings` and `GET /api/contacts` (docs/02 §6), which no earlier task owned and which only the System tab uses; tests in `api/tests/test_settings_contacts.py`.
   - **Memory** tab:
     - USER.md + MEMORY.md, one Textarea per entry, with add/delete and character counters vs 1,375 / 2,200, plus Save.
     - Shows "Changes apply from your next new chat".
