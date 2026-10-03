@@ -308,7 +308,7 @@ How to tick:
 - [x] **T3.4** — `/api/activity` feed — E2 — 1h
   - `GET /api/activity?after_id=` → `audit_events` rows `[{id, ts, kind, summary, detail, ref_table, ref_id}]`.
   - Built in the M1 window because the M1 Done-when check and the Chat polling use it.
-- [ ] **T3.5** — E2E test: legit chase → Low → approve → exactly one send; BEC → High "lookalike of acme-logistics.example" → reject → nothing sent; concurrent double-approve → one send — E2 — 2h
+- [x] **T3.5** — E2E test: legit chase → Low → approve → exactly one send; BEC → High "lookalike of acme-logistics.example" → reject → nothing sent; concurrent double-approve → one send — E2 — 2h
   - Add a minimal `pytest` job (uv sync + `uv run pytest`) to `.github/workflows/ci.yml`; T5.7 later extends it with ruff, pyright, `pnpm build` and compose up + `/api/health`.
   - The test needs no network or secrets. It calls the `mail_send` MCP tool directly with fixed args (the legit Acme draft to rahul.verma@acme-logistics.example; the BEC send to billing@acme-logistics-payments.example), then `POST /api/actions/{id}/approve` / `reject` via the FastAPI test client, with SMTP stubbed so the assertion counts send calls. No Token Factory call runs in CI.
 

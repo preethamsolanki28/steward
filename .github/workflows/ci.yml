@@ -6,9 +6,24 @@ on:
   pull_request:
 
 jobs:
-  # T0.1 placeholder so the workflow exists from day 1 (docs/04 §4 M3 note).
-  # TODO(T3.5): add the pytest job (uv sync + uv run pytest).
+  # T3.5: the Approval Gate tests (and the rest of the suite) need no network and no secrets.
   # TODO(T5.7): add ruff, pyright, pnpm build, and compose up + /api/health.
+  pytest:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.10" # same uv as api/Dockerfile
+          python-version: "3.12"
+      - name: Install locked dependencies
+        run: uv sync --locked
+      - name: Run tests
+        run: uv run pytest
+
   compose-config:
     runs-on: ubuntu-latest
     steps:
