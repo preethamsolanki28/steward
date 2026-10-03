@@ -467,7 +467,7 @@ Tick a box only after you have seen it pass yourself. Runtime items are checked 
 ### M3
 - [ ] T3.5 passes in CI
   - Dependency: T5.7 (full CI) is scheduled in M5, but `.github/workflows/ci.yml` exists from T0.1, and T3.5 adds the pytest job. It has to run pytest by Day 9. Otherwise M3 cannot be ticked on time and the should-have gate stays closed.
-  - 2026-10-03: the pytest job is in `ci.yml` (T3.5). Its exact steps (`uv sync --locked`, `uv run pytest`, uv 0.12.10, Python 3.12) pass on `main` in a clean `linux/amd64` `python:3.12.15-slim-bookworm` container: 369 passed. Not ticked: the repo has no GitHub remote yet, so no GitHub Actions run exists; tick on the first green Actions run.
+  - 2026-10-03: the pytest job is in `ci.yml` (T3.5). Its exact steps (`uv sync --locked`, `uv run pytest`, uv 0.12.10, Python 3.12) pass on `main` in a clean `linux/amd64` `python:3.12.15-slim-bookworm` container: 384 passed (re-run 2026-10-03, pre-M4); `uv lock --check` passes and the `compose-config` job passes in a clean export. Not ticked: the repo has no GitHub remote yet, so no GitHub Actions run exists; tick on the first green Actions run. Before the first push (human steps): create the public `steward` repo with no generated README/LICENSE (LICENSE stays the first commit), decide whether the tracked `.claude/context/` and `.claude/memory/` files may become public, then add the remote and push `main`.
 
 ### M4
 - [ ] all 4 screens work against the live API with seed data
