@@ -26,9 +26,25 @@ seed: check-docker
 	$(COMPOSE) exec -T steward-api python -m steward.seed
 
 ## demo-reset: wipe Hermes state + steward.db, reseed (new reset_nonce), start
-demo-reset:
-	@echo "TODO(T5.2): make demo-reset is implemented in T5.2 (it needs steward.seed from T1.1)." >&2
-	@exit 1
+# docs/04 T5.2, in order: init; stop both services; delete Hermes state.db*,
+# response_store.db, sessions/ and steward.db (each DB with its -wal/-shm journal files, so a
+# fresh DB never replays a stale journal); reseed (new reset_nonce, contacts, inbox,
+# workspace, memories); start. Nothing else is touched: .env (init only fills missing keys),
+# Hermes's job store (cron/), skills, logs and data/t03 survive.
+RESET_FILES = data/hermes/state.db data/hermes/state.db-wal data/hermes/state.db-shm \
+	data/hermes/response_store.db data/hermes/response_store.db-wal \
+	data/hermes/response_store.db-shm data/hermes/sessions \
+	data/steward.db data/steward.db-wal data/steward.db-shm
+demo-reset: check-docker init
+	$(COMPOSE) stop
+	@for f in $(RESET_FILES) data/hermes/state.db*; do \
+		[ -e "$$f" ] || continue; \
+		rm -rf "$$f" 2>/dev/null || sudo -n rm -rf "$$f" \
+			|| { echo "demo-reset: cannot delete $$f (run: sudo rm -rf $$f)" >&2; exit 1; }; \
+	done
+	@echo "demo-reset: deleted Hermes sessions/state and steward.db"
+	$(COMPOSE) run --rm --no-deps steward-api python -m steward.seed
+	$(COMPOSE) up -d
 
 ## brief-now: trigger the morning-brief Hermes job now (same path as the 08:00 schedule)
 brief-now:
