@@ -2,7 +2,6 @@
 
 import smtplib
 from datetime import datetime
-from email.message import EmailMessage
 
 import anyio
 import pytest
@@ -10,6 +9,7 @@ import pytest
 from steward import db, seed
 from steward.config import get_settings
 from steward.connectors import mail_demo, smtp
+from tests.conftest import FakeSMTP
 
 
 @pytest.fixture
@@ -43,42 +43,6 @@ def test_read_marks_read_and_store_sent(seeded: None) -> None:
             "b",
         )
         assert mail_demo.search(conn, "", folder="sent")[0]["id"] == sid
-
-
-class FakeSMTP:
-    sent: list[EmailMessage] = []
-    fail: Exception | None = None
-
-    def __init__(self, host: str, port: int, timeout: float) -> None:
-        self.host, self.port, self.timeout = host, port, timeout
-
-    def __enter__(self) -> "FakeSMTP":
-        return self
-
-    def __exit__(self, *exc: object) -> None:
-        return None
-
-    def starttls(self) -> None:
-        return None
-
-    def login(self, user: str, password: str) -> None:
-        return None
-
-    def send_message(self, msg: EmailMessage) -> None:
-        if FakeSMTP.fail:
-            raise FakeSMTP.fail
-        FakeSMTP.sent.append(msg)
-
-
-@pytest.fixture
-def fake_smtp(monkeypatch: pytest.MonkeyPatch) -> type[FakeSMTP]:
-    FakeSMTP.sent, FakeSMTP.fail = [], None
-    monkeypatch.setattr(smtplib, "SMTP", FakeSMTP)
-    monkeypatch.setenv("SMTP_HOST", "smtp.example")
-    monkeypatch.setenv("SMTP_PORT", "587")
-    monkeypatch.setenv("SMTP_USER", "demo@team.example")
-    monkeypatch.setenv("SMTP_PASSWORD", "app-password")
-    return FakeSMTP
 
 
 def _send() -> int:

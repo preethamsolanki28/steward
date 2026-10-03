@@ -1,4 +1,4 @@
-"""T1.3: steward-tools MCP server over the seeded data (no network)."""
+"""T1.3 / T3.1: steward-tools MCP server over the seeded data (no network)."""
 
 import json
 from datetime import datetime
@@ -19,13 +19,15 @@ HEADERS = {
     "Accept": "application/json, text/event-stream",
     "Content-Type": "application/json",
 }
-M1_TOOLS = [
+TOOLS = [  # docs/02 §6: the 9 steward tools
     "brief_save",
     "contacts_lookup",
     "files_list",
     "files_read",
+    "files_write",
     "mail_read",
     "mail_search",
+    "mail_send",
     "web_search",
 ]
 
@@ -78,9 +80,9 @@ def test_requires_bearer_and_listed_host(client: TestClient) -> None:
     assert r.status_code in (400, 421)
 
 
-def test_exactly_the_m1_tools(client: TestClient) -> None:
+def test_exactly_the_nine_tools(client: TestClient) -> None:
     r = _rpc(client, "tools/list", {})
-    assert sorted(t["name"] for t in r.json()["result"]["tools"]) == M1_TOOLS
+    assert sorted(t["name"] for t in r.json()["result"]["tools"]) == TOOLS
 
 
 def test_mail_search_wraps_and_upserts_headers_untrusted(client: TestClient) -> None:

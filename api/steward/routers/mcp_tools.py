@@ -1,8 +1,8 @@
 """steward-tools MCP server at /mcp (docs/02 §6 "MCP tools"). Hermes registers it as `steward`,
 so the model sees each tool as mcp__steward__<name> (T0.4).
 
-M1 tools: mail_search, mail_read, files_list, files_read, contacts_lookup, web_search,
-brief_save. mail_send and files_write arrive in T3.1 (Approval Gate).
+Tools: mail_search, mail_read, mail_send, files_list, files_read, files_write,
+contacts_lookup, web_search, brief_save.
 
 Rules enforced here:
 - Untrusted content (mail subjects/snippets/bodies, file contents, web results) is wrapped as
@@ -10,6 +10,8 @@ Rules enforced here:
 - mail_search/mail_read upsert every From/To header into contacts with source 'mail',
   trusted 0, org NULL, and never modify an existing row: the agent cannot create trust.
 - files_* go through connectors.files.safe_path.
+- mail_send and files_write never send or write: they only queue a pending action for the
+  Approval Gate (gate/actions.py), High risk included.
 - Every call writes audit_events(kind='tool_call').
 """
 
@@ -23,6 +25,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 
 from steward import db, jobs
 from steward.connectors import files, mail_demo, tavily
+from steward.gate import actions
 
 mcp_server = MCPServer(name="steward-tools")
 SERVER_NAME = "steward"  # the mcp_servers key in hermes/config.yaml.tmpl
@@ -114,6 +117,22 @@ async def mail_read(id: int) -> dict[str, Any]:
 
 
 @mcp_server.tool()
+async def mail_send(
+    to: list[str] | str, subject: str, body: str, in_reply_to: str | int | None = None
+) -> dict[str, Any]:
+    """Queue an email for the user's approval. This never sends anything: it creates a pending
+    action and returns its number. `to` is a list of recipient addresses (the trusted
+    contact's email); `in_reply_to` is the id of the email you are replying to, if any."""
+    await _audit_tool("mail_send")
+
+    def work(conn: sqlite3.Connection) -> dict[str, Any]:
+        args = actions.mail_args(to, subject, body, in_reply_to)
+        return actions.create(conn, "mail_send", args)
+
+    return await _queue(work)
+
+
+@mcp_server.tool()
 async def files_list(dir: str = "") -> list[dict[str, Any]]:
     """List files in the workspace (recursively), e.g. dir='invoices'."""
     await _audit_tool("files_list")
@@ -132,6 +151,32 @@ async def files_read(path: str) -> dict[str, str]:
     except files.UnsafePath as exc:
         raise ToolError(str(exc)) from exc
     return {"path": result["path"], "content": untrusted("file", result["content"])}
+
+
+@mcp_server.tool()
+async def files_write(path: str, content: str) -> dict[str, Any]:
+    """Queue a workspace file write for the user's approval, e.g. path='notes/acme.md'. This
+    never writes anything: it creates a pending action and returns its number. Writing over an
+    existing file is High risk."""
+    await _audit_tool("files_write")
+
+    def work(conn: sqlite3.Connection) -> dict[str, Any]:
+        args, target = actions.files_args(path, content)
+        return actions.create(conn, "files_write", args, path_exists=target.exists())
+
+    return await _queue(work)
+
+
+async def _queue(work: Any) -> dict[str, Any]:
+    """Run an action-creating transaction; on any error nothing is queued (rolled back)."""
+    try:
+        return await db.run(work)
+    except (actions.InvalidAction, files.UnsafePath) as exc:
+        raise ToolError(str(exc)) from exc
+    except Exception as exc:  # fail closed: never a half-created or unscored action
+        raise ToolError(
+            f"could not queue the action ({type(exc).__name__}); nothing queued"
+        ) from exc
 
 
 @mcp_server.tool()

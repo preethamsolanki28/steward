@@ -275,7 +275,7 @@ How to tick:
 
 ### M3 — Approval Gate (Day 7–9, 11.5h)
 
-- [ ] **T3.1** — actions table; mail_send + files_write create pending actions — E1 — 2h
+- [x] **T3.1** — actions table; mail_send + files_write create pending actions — E1 — 2h
   - `mail_send(to: string[], subject, body, in_reply_to?)` and `files_write(path, content)` behave as follows:
     - Each inserts an `actions` row (status 'pending', preview, risk, risk_reasons) and writes `audit_events(kind='action_created')`.
     - Each returns `{action_id, status:'pending', risk}` with the text "Queued for approval as action #<id>. The user will review it."

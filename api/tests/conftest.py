@@ -3,6 +3,10 @@
 Nothing in the test suite touches ./data, ./workspace or the network.
 """
 
+import smtplib
+import threading
+import time
+from email.message import EmailMessage
 from pathlib import Path
 
 import pytest
@@ -38,3 +42,51 @@ def isolated_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
     monkeypatch.setattr(jobs, "register_on_startup", no_registration)
     return tmp_path
+
+
+class FakeSMTP:
+    """smtplib.SMTP stand-in: records every connection attempt and every accepted message.
+    `fail` makes send_message raise; `delay` makes it slow (for race tests)."""
+
+    sent: list[EmailMessage] = []
+    attempts: int = 0
+    fail: Exception | None = None
+    delay: float = 0.0
+    _lock = threading.Lock()
+
+    def __init__(self, host: str, port: int, timeout: float) -> None:
+        self.host, self.port, self.timeout = host, port, timeout
+
+    def __enter__(self) -> "FakeSMTP":
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+    def starttls(self) -> None:
+        return None
+
+    def login(self, user: str, password: str) -> None:
+        return None
+
+    def send_message(self, msg: EmailMessage) -> None:
+        with FakeSMTP._lock:
+            FakeSMTP.attempts += 1
+        if FakeSMTP.delay:
+            time.sleep(FakeSMTP.delay)
+        if FakeSMTP.fail:
+            raise FakeSMTP.fail
+        with FakeSMTP._lock:
+            FakeSMTP.sent.append(msg)
+
+
+@pytest.fixture
+def fake_smtp(monkeypatch: pytest.MonkeyPatch) -> type[FakeSMTP]:
+    FakeSMTP.sent, FakeSMTP.attempts, FakeSMTP.fail, FakeSMTP.delay = [], 0, None, 0.0
+    monkeypatch.setattr(smtplib, "SMTP", FakeSMTP)
+    monkeypatch.setattr(smtplib, "SMTP_SSL", FakeSMTP)
+    monkeypatch.setenv("SMTP_HOST", "smtp.example")
+    monkeypatch.setenv("SMTP_PORT", "587")
+    monkeypatch.setenv("SMTP_USER", "demo@team.example")
+    monkeypatch.setenv("SMTP_PASSWORD", "app-password")
+    return FakeSMTP
