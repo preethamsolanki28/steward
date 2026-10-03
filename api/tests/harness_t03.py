@@ -1,34 +1,44 @@
-"""T0.3 riskiest-assumption harness + DG-1 scorer (docs/04 T0.3, docs/02 §10).
+"""DG-1 harness (T0.3), re-run through the FULL Privacy Shield (T2.5).
 
-M0 artifact: it drove the T0.3 stub MCP server (retired in T1.3, which reads the seed data
-instead of the fixture). TODO(T2.5): adapt it to the real steward-tools before re-running DG-1
-through the full Shield.
+Each run is one fresh "Chase the Acme invoice" conversation through the real path:
+POST /api/chat -> Hermes -> /v1 Shield proxy (pseudonymize, leak check, re-identify) ->
+Nebius Token Factory, with the real steward-tools over the seed data. The model under test is set
+as settings.model_primary for its batch (the proxy reads the chain from settings) and restored
+afterwards.
 
-Runs the invoice-chase prompt N times (default 10) for each of {Lightning, Super} x {plain,
-pseudonymized} through the real chain: Hermes (pinned image) -> T0.3 passthrough proxy ->
-Nebius Token Factory, with the stub `steward` MCP server over the self-contained Acme fixture.
+Per run it records, from the ledger and the audit log:
+- tool order: files_read and mail_search executed (mail_send arrives in T3.1, so the DG-1
+  "queue mail_send" step is measured as a correct draft in the reply instead);
+- argument validity of every tool call the model emitted (ledger response_redacted), as in T0.3:
+  a JSON object that matches the schema of an offered tool (the tools[] of that same request:
+  required keys present, no unknown keys, top-level types). A JSON-only count is also reported.
+  Only calls the model made before /api/chat returned are scored; Hermes' post-reply calls
+  (session title, background skill curator) are reported but not scored. Calls to
+  mcp__steward__mail_send are counted separately: the skill names it, but the tool and its
+  schema only exist from T3.1, and Hermes auto-repairs the unknown name to mail_read;
+- whether Hermes paused the steward MCP server (its circuit breaker after 3 rejected calls);
+- placeholder integrity: of the placeholder-like tokens Nemotron emitted (bracketed, or bare
+  like "ORG_1"), the share that is exact canonical syntax AND a known vault placeholder. The
+  DG-1 gate uses the draft (the final assistant message: "placeholders come back intact in the
+  draft"); turn outputs (incl. tool args) and all model output (incl. the session title and the
+  background curator) are reported too;
+- the re-identified reply: greets Rahul, names INV-0042 and $4,800, and contains no
+  placeholder-like token (bracketed or bare);
+- zero Shield blocks; end-to-end turn latency; tokens (incl. the session-title auxiliary call).
 
-It makes REAL Token Factory calls and spends credit, so it is never part of `make test`. Run it
-deliberately, inside the compose network (Hermes 8642 is not published):
+DG-1 PASS (docs/04): for at least one model, >=8/10 runs succeed, >=95% placeholder integrity,
+p50 turn latency <=45 s.
+
+Real Token Factory calls (spends credit); never part of `make test`. Run inside the network:
 
     docker compose run --rm --no-deps -v ./api/tests:/app/tests:ro steward-api \
-        python -m tests.harness_t03 [--runs 10] [--effort low]
-
-Per run it records: tool order + JSON-arg validity, placeholder integrity in the draft,
-end-to-end turn latency and tokens. Results go to /data/t03/results-<stamp>.json, and the
-4-row DG-1 table is printed in the docs/02 format.
-
-DG-1 PASS (docs/04): for at least one model, >=8/10 runs call the right tools in order with
-valid JSON args, >=95% of placeholders come back intact in the draft, and p50 end-to-end turn
-latency <=45 s. The gate is applied to each model's PSEUDONYMIZED row (the production path);
-the plain row is the control that shows what pseudonymization costs.
+        python -m tests.harness_t03 [--runs 10]
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import statistics
 import sys
@@ -37,361 +47,492 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from steward import t03_experiment, t03_fixture
-
 MODELS = {
     "Lightning": "nvidia/Nemotron-3_5-Lightning",
     "Super": "nvidia/nemotron-3-super-120b-a12b",
 }
-FIXTURES: tuple[t03_fixture.FixtureName, ...] = ("plain", "pseudonymized")
-TURN_TIMEOUT_S = 300.0  # same as /api/chat -> Hermes (docs/02 §7a)
+PROMPT = "Chase the Acme invoice"
+TURN_TIMEOUT_S = 300.0
+TOLERANT = re.compile(r"\[{1,2}\s*([A-Za-z]+)_(\d+)\s*\]{1,2}")
+MAIL_SEND = "mcp__steward__mail_send"
+CANONICAL = re.compile(r"^\[\[[A-Z]+_\d+\]\]$")
+# A placeholder whose brackets the model dropped ("ORG_1", "PERSON 3"). The re-identifier's
+# tolerant matcher (docs/04 T2.1) needs brackets, so these reach the user unresolved.
+BARE = re.compile(r"(?<![\w⟦])(?:PERSON|ORG|EMAIL|DOMAIN|PHONE|ACCOUNT|MONEY)[ _]\d+(?!\w)")
 
-STEWARD_TOOL = re.compile(r"^mcp_{1,2}steward_{1,2}(files_read|mail_search|mail_send)$")
-TOLERANT_PLACEHOLDER = re.compile(r"\[{1,2}\s*([A-Za-z]+)_(\d+)\s*\]{1,2}")
-CANONICAL_PLACEHOLDER = re.compile(r"^\[\[[A-Z]+_\d+\]\]$")
 
-REQUIRED_ARGS: dict[str, dict[str, type]] = {
-    "files_read": {"path": str},
-    "mail_search": {"query": str},
-    "mail_send": {"to": list, "subject": str, "body": str},
-}
+def placeholder_like(text: str) -> list[str]:
+    """Every placeholder-shaped token: bracketed (tolerant) ones plus bare ones."""
+    found = [(m.start(), m.end(), m.group(0)) for m in TOLERANT.finditer(text)]
+    found += [
+        (m.start(), m.end(), m.group(0))
+        for m in BARE.finditer(text)
+        if not any(a <= m.start() < b for a, b, _ in found)
+    ]
+    return [t for _, _, t in sorted(found)]
 
-DG1_MIN_SUCCESS = 8
-DG1_MIN_INTEGRITY = 0.95
-DG1_MAX_P50_S = 45.0
+
+DG1_MIN_SUCCESS, DG1_MIN_INTEGRITY, DG1_MAX_P50_S = 8, 0.95, 45.0
 
 
 @dataclass
-class RunResult:
-    run_id: str
+class Run:
+    label: str
     model: str
-    fixture: str
-    hermes_status: int | None
+    status: int | None
     latency_s: float
     reply: str
-    proxy_calls: int
-    proxy_errors: list[int]
+    tools: list[str]
+    llm_rows: int
+    blocked_rows: int
+    error_rows: int
+    escalations: int
     tokens: int
-    executed_tools: list[str]
-    model_tool_calls: list[str]
-    invalid_json_args: list[str]
+    invalid_args: list[str]
+    placeholders_total: int  # every model output in the window (turn, title, curator)
+    placeholders_intact: int
+    turn_placeholders_total: int  # outputs before /api/chat returned (content + tool args)
+    turn_placeholders_intact: int
+    draft_placeholders_total: int  # the final assistant message = the draft (DG-1 criterion)
+    draft_placeholders_intact: int
+    unresolved_in_reply: int
     order_ok: bool
     json_ok: bool
-    completed: bool
+    schema_ok: bool
+    draft_ok: bool
+    mcp_paused: bool
+    mail_send_attempts: int
+    post_turn_schema_errors: list[str]
     success: bool
-    recipient_ok: bool
-    placeholders_total: int
-    placeholders_intact: int
-    bad_placeholders: list[str] = field(default_factory=list)
+    success_json_only: bool
     notes: list[str] = field(default_factory=list)
+    window: dict[str, int] = field(default_factory=dict)
 
 
-def _read_jsonl(path: Path) -> list[dict[str, Any]]:
-    if not path.exists():
-        return []
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
+_TYPES: dict[str, type | tuple[type, ...]] = {
+    "string": str,
+    "integer": int,
+    "number": (int, float),
+    "boolean": bool,
+    "array": list,
+    "object": dict,
+}
 
 
-def _short_tool(name: str) -> str | None:
-    match = STEWARD_TOOL.match(name)
-    return match.group(1) if match else None
-
-
-def _validate_args(short: str | None, raw: Any) -> str | None:
-    """None if the raw tool-call arguments are a valid JSON object for the tool, else a reason."""
+def tool_schemas(request_redacted: str | None) -> dict[str, dict[str, Any]]:
     try:
-        args = json.loads(raw) if isinstance(raw, str) else raw
-    except (TypeError, ValueError):
-        return "not JSON"
+        req = json.loads(request_redacted or "null")
+    except ValueError:
+        return {}
+    if not isinstance(req, dict):
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    for tool in req.get("tools") or []:
+        fn = (tool or {}).get("function") or {}
+        if fn.get("name"):
+            out[fn["name"]] = fn.get("parameters") or {}
+    return out
+
+
+def schema_errors(name: str, args: Any, schemas: dict[str, dict[str, Any]]) -> list[str]:
+    if name not in schemas:
+        return [f"{name}: not an offered tool"]
     if not isinstance(args, dict):
-        return "not a JSON object"
-    for key, typ in REQUIRED_ARGS.get(short or "", {}).items():
-        if not isinstance(args.get(key), typ):
-            return f"missing/invalid '{key}'"
-    if short == "mail_send" and not (args["to"] and all(isinstance(t, str) for t in args["to"])):
-        return "'to' must be a non-empty list of strings"
-    return None
+        return [f"{name}: arguments are not a JSON object"]
+    schema = schemas[name]
+    props = schema.get("properties") or {}
+    errs = [f"{name}: missing '{k}'" for k in schema.get("required") or [] if k not in args]
+    if props and schema.get("additionalProperties") is not True:
+        errs += [f"{name}: unknown '{k}'" for k in args if k not in props]
+    for key, value in args.items():
+        kind = (props.get(key) or {}).get("type")
+        py = _TYPES.get(kind) if isinstance(kind, str) else None
+        if py and (not isinstance(value, py) or (kind != "boolean" and isinstance(value, bool))):
+            errs.append(f"{name}: '{key}' is not {kind}")
+    return errs
 
 
-def score_run(
-    run_id: str,
+def is_path_probe(r: dict[str, Any]) -> bool:
+    """An unknown /v1/* request (Hermes sends GET /v1/props on its first model call after a
+    restart): 404 + a 'blocked' ledger row holding only {method, path} by design (docs/02 §7a
+    step 2). It is not part of the turn, so it is reported but not scored as a Shield block."""
+    try:
+        req = json.loads(r.get("request_redacted") or "null")
+    except ValueError:
+        return False
+    return isinstance(req, dict) and set(req) == {"method", "path"}
+
+
+def score(
+    label: str,
     model: str,
-    fixture: t03_fixture.FixtureName,
-    hermes_status: int | None,
-    latency_s: float,
+    status: int | None,
+    latency: float,
     reply: str,
-    proxy_records: list[dict[str, Any]],
-    tool_records: list[dict[str, Any]],
-) -> RunResult:
-    notes: list[str] = []
-    tokens = 0
-    model_tool_calls: list[str] = []
+    rows: list[dict[str, Any]],
+    tools: list[str],
+    vault: set[str],
+    turn_max_id: int | None = None,
+) -> Run:
+    probes = sum(1 for r in rows if r["channel"] == "llm" and is_path_probe(r))
+    llm = [r for r in rows if r["channel"] == "llm" and not is_path_probe(r)]
+    blocked = sum(r["status"] == "blocked" for r in llm)
+    errors = sum(r["status"] == "error" for r in llm)
+    tokens = sum((r["prompt_tokens"] or 0) + (r["completion_tokens"] or 0) for r in llm)
     invalid: list[str] = []
-    proxy_errors = [int(r.get("status") or 0) for r in proxy_records if r.get("status") != 200]
-    for rec in proxy_records:
-        resp = rec.get("response") or {}
-        if rec.get("status") != 200 or not isinstance(resp, dict):
+    schema_errs: list[str] = []
+    post_turn: list[str] = []
+    mail_send = 0
+    count = {"all": [0, 0], "turn": [0, 0], "draft": [0, 0]}  # [intact, total]
+    draft_text = ""
+
+    def tally(text: str, *keys: str) -> None:
+        for token in placeholder_like(text):
+            ok = bool(CANONICAL.match(token)) and token in vault
+            for key in keys:
+                count[key][0] += ok
+                count[key][1] += 1
+
+    for r in llm:
+        if r["status"] != "ok" or not r["response_redacted"]:
             continue
-        usage = resp.get("usage") or {}
-        tokens += int(usage.get("prompt_tokens") or 0) + int(usage.get("completion_tokens") or 0)
+        resp = json.loads(r["response_redacted"])
+        schemas = tool_schemas(r.get("request_redacted"))
+        in_turn = turn_max_id is None or r.get("id", 0) <= turn_max_id
         for choice in resp.get("choices") or []:
-            for call in (choice.get("message") or {}).get("tool_calls") or []:
+            msg = choice.get("message") or {}
+            texts = [str(msg.get("content") or "")]
+            for call in msg.get("tool_calls") or []:
                 fn = call.get("function") or {}
-                name = str(fn.get("name") or "")
-                model_tool_calls.append(name)
-                reason = _validate_args(_short_tool(name), fn.get("arguments"))
-                if reason:
-                    invalid.append(f"{name}: {reason}")
-
-    executed = [str(r.get("tool")) for r in tool_records]
-    sends = [i for i, t in enumerate(executed) if t == "mail_send"]
-    reads = [i for i, t in enumerate(executed) if t == "files_read"]
-    searches = [i for i, t in enumerate(executed) if t == "mail_search"]
-    order_ok = (
-        len(sends) == 1 and any(i < sends[0] for i in reads) and any(i < sends[0] for i in searches)
+                raw = fn.get("arguments") or ""
+                texts.append(raw)
+                name = str(fn.get("name"))
+                if name == MAIL_SEND and name not in schemas:
+                    mail_send += in_turn
+                    continue
+                try:
+                    args = json.loads(raw)
+                except (TypeError, ValueError):
+                    args = None
+                if not isinstance(args, dict):
+                    errs = [f"{name}: not a JSON object"]
+                    (invalid if in_turn else post_turn).extend(errs)
+                    continue
+                errs = schema_errors(name, args, schemas)
+                (schema_errs if in_turn else post_turn).extend(errs)
+            for text in texts:
+                tally(text, "all", *(["turn"] if in_turn else []))
+            if in_turn and msg.get("content") and not msg.get("tool_calls"):
+                draft_text = str(msg["content"])
+    tally(draft_text, "draft")
+    short = [t.removeprefix("mcp__steward__") for t in tools]
+    order_ok = "files_read" in short and "mail_search" in short
+    flat = reply.replace("‑", "-").replace(" ", " ")
+    unresolved = len(placeholder_like(flat))
+    draft_ok = (
+        bool(re.search(r"\b(Dear|Hi|Hello)\s+Rahul\b", flat))
+        and "INV-0042" in flat
+        and "4,800" in flat
+        and unresolved == 0
     )
-    if len(sends) != 1:
-        notes.append(f"mail_send executed {len(sends)}x")
     json_ok = not invalid
-    completed = hermes_status == 200 and not proxy_errors and bool(proxy_records)
-    if proxy_errors:
-        notes.append(f"proxy/upstream errors: {proxy_errors}")
-
-    send_args: dict[str, Any] = next(
-        (r.get("args") or {} for r in tool_records if r.get("tool") == "mail_send"), {}
-    )
-    recipient_ok = send_args.get("to") == [t03_fixture.expected_recipient(fixture)]
-
-    total = intact = 0
-    bad: list[str] = []
-    if fixture == "pseudonymized":
-        draft = " ".join(
-            [
-                " ".join(map(str, send_args.get("to") or [])),
-                str(send_args.get("subject") or ""),
-                str(send_args.get("body") or ""),
-                reply,
-            ]
-        )
-        for match in TOLERANT_PLACEHOLDER.finditer(draft):
-            total += 1
-            text = match.group(0)
-            if CANONICAL_PLACEHOLDER.match(text) and text in t03_fixture.PLACEHOLDER_VOCAB:
-                intact += 1
-            else:
-                bad.append(text)
-        if total == 0:
-            notes.append("no placeholders in draft")
-
-    return RunResult(
-        run_id=run_id,
+    schema_ok = json_ok and not schema_errs
+    paused = any("rejected the last" in (r.get("request_redacted") or "") for r in llm)
+    notes = []
+    if probes:
+        notes.append(f"{probes} /v1 path probe(s) 404'd (not scored)")
+    if blocked:
+        notes.append(f"{blocked} Shield blocks")
+    if errors:
+        notes.append(f"{errors} upstream errors")
+    if schema_errs:
+        notes.append(f"{len(schema_errs)} schema errors: {sorted(set(schema_errs))[:4]}")
+    if paused:
+        notes.append("Hermes paused the steward MCP server")
+    if mail_send:
+        notes.append(f"{mail_send} mail_send calls (tool not offered before T3.1)")
+    if post_turn:
+        notes.append(f"{len(post_turn)} post-reply schema errors (not scored)")
+    base = status == 200 and not blocked and not errors and order_ok and draft_ok
+    return Run(
+        label=label,
         model=model,
-        fixture=fixture,
-        hermes_status=hermes_status,
-        latency_s=round(latency_s, 2),
+        status=status,
+        latency_s=round(latency, 2),
         reply=reply,
-        proxy_calls=len(proxy_records),
-        proxy_errors=proxy_errors,
+        tools=short,
+        llm_rows=len(llm),
+        blocked_rows=blocked,
+        error_rows=errors,
+        escalations=sum(1 for r in llm if r["escalated_from"]),
         tokens=tokens,
-        executed_tools=executed,
-        model_tool_calls=model_tool_calls,
-        invalid_json_args=invalid,
+        invalid_args=invalid + schema_errs,
+        placeholders_total=count["all"][1],
+        placeholders_intact=count["all"][0],
+        turn_placeholders_total=count["turn"][1],
+        turn_placeholders_intact=count["turn"][0],
+        draft_placeholders_total=count["draft"][1],
+        draft_placeholders_intact=count["draft"][0],
+        unresolved_in_reply=unresolved,
         order_ok=order_ok,
         json_ok=json_ok,
-        completed=completed,
-        success=completed and order_ok and json_ok,
-        recipient_ok=recipient_ok,
-        placeholders_total=total,
-        placeholders_intact=intact,
-        bad_placeholders=bad,
+        schema_ok=schema_ok,
+        draft_ok=draft_ok,
+        mcp_paused=paused,
+        mail_send_attempts=mail_send,
+        post_turn_schema_errors=post_turn,
+        success=base and schema_ok,
+        success_json_only=base and json_ok,
         notes=notes,
     )
 
 
-def summarize(results: list[RunResult]) -> list[dict[str, Any]]:
+def summarize(runs: list[Run]) -> list[dict[str, Any]]:
     rows = []
     for label, model in MODELS.items():
-        for fixture in FIXTURES:
-            runs = [r for r in results if r.model == model and r.fixture == fixture]
-            if not runs:
-                continue
-            total = sum(r.placeholders_total for r in runs)
-            intact = sum(r.placeholders_intact for r in runs)
-            rows.append(
-                {
-                    "label": label,
-                    "model": model,
-                    "fixture": fixture,
-                    "runs": len(runs),
-                    "success": sum(r.success for r in runs),
-                    "recipient_ok": sum(r.recipient_ok for r in runs),
-                    "integrity": (intact / total)
-                    if (fixture == "pseudonymized" and total)
-                    else None,
-                    "placeholders": f"{intact}/{total}" if fixture == "pseudonymized" else "n/a",
-                    "p50_latency_s": round(statistics.median(r.latency_s for r in runs), 1),
-                    "mean_tokens": round(statistics.mean(r.tokens for r in runs)),
-                }
-            )
+        rs = [r for r in runs if r.model == model]
+        if not rs:
+            continue
+
+        def ratio(kind: str, rs: list[Run] = rs) -> tuple[float | None, str]:
+            prefix = "" if kind == "all" else f"{kind}_"
+            intact = sum(getattr(r, f"{prefix}placeholders_intact") for r in rs)
+            total = sum(getattr(r, f"{prefix}placeholders_total") for r in rs)
+            return (intact / total if total else None), f"{intact}/{total}"
+
+        rows.append(
+            {
+                "label": label,
+                "model": model,
+                "runs": len(rs),
+                "success": sum(r.success for r in rs),
+                "success_json_only": sum(r.success_json_only for r in rs),
+                "schema_error_runs": sum(not r.schema_ok for r in rs),
+                "mcp_paused_runs": sum(r.mcp_paused for r in rs),
+                "mail_send_runs": sum(r.mail_send_attempts > 0 for r in rs),
+                "integrity": ratio("draft")[0],
+                "placeholders": ratio("draft")[1],
+                "integrity_turn": ratio("turn")[0],
+                "placeholders_turn": ratio("turn")[1],
+                "integrity_all": ratio("all")[0],
+                "placeholders_all": ratio("all")[1],
+                "p50_latency_s": round(statistics.median(r.latency_s for r in rs), 1),
+                "mean_tokens": round(statistics.mean(r.tokens for r in rs)),
+                "blocked": sum(r.blocked_rows for r in rs),
+                "escalations": sum(r.escalations for r in rs),
+            }
+        )
     return rows
 
 
-def dg1_verdict(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    per_model = {}
-    for row in rows:
-        if row["fixture"] != "pseudonymized":
-            continue
-        passed = (
-            row["runs"] >= 10
-            and row["success"] >= DG1_MIN_SUCCESS
-            and row["integrity"] is not None
-            and row["integrity"] >= DG1_MIN_INTEGRITY
-            and row["p50_latency_s"] <= DG1_MAX_P50_S
+def verdict(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    per_model = {
+        r["model"]: (
+            r["runs"] >= 10
+            and r["success"] >= DG1_MIN_SUCCESS
+            and r["integrity"] is not None
+            and r["integrity"] >= DG1_MIN_INTEGRITY
+            and r["p50_latency_s"] <= DG1_MAX_P50_S
         )
-        per_model[row["model"]] = passed
+        for r in rows
+    }
     return {"pass": any(per_model.values()), "per_model": per_model}
 
 
-def markdown_table(rows: list[dict[str, Any]]) -> str:
-    lines = [
-        "| Model | Fixture | Tool-order success (of 10) | Placeholder integrity | p50 latency "
-        "| Tokens |",
-        "| --- | --- | --- | --- | --- | --- |",
+def table(rows: list[dict[str, Any]]) -> str:
+    out = [
+        "| Model | Path | Success (of 10) | Success, JSON-only args | "
+        "Placeholder integrity: draft (DG-1) | turn outputs | all model output | "
+        "p50 latency | Tokens | Shield blocks | Escalations | Runs with schema errors | "
+        "Runs where Hermes paused steward MCP | Runs that called mail_send (pre-T3.1) |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
+
+    def pct(value: float | None, frac: str) -> str:
+        return f"{value * 100:.1f}% ({frac})" if value is not None else f"none emitted ({frac})"
+
     for r in rows:
         integrity = (
-            f"{r['integrity'] * 100:.1f}% ({r['placeholders']})"
-            if r["integrity"] is not None
-            else ("n/a" if r["fixture"] == "plain" else f"none in draft ({r['placeholders']})")
+            f"{pct(r['integrity'], r['placeholders'])} | "
+            f"{pct(r['integrity_turn'], r['placeholders_turn'])} | "
+            f"{pct(r['integrity_all'], r['placeholders_all'])}"
         )
-        lines.append(
-            f"| `{r['model']}` | {r['fixture']} | {r['success']}/{r['runs']} | {integrity} | "
-            f"{r['p50_latency_s']} s | {r['mean_tokens']} per run |"
+        out.append(
+            f"| `{r['model']}` | full Shield | {r['success']}/{r['runs']} | "
+            f"{r['success_json_only']}/{r['runs']} | {integrity} | {r['p50_latency_s']} s | "
+            f"{r['mean_tokens']:,} per run | {r['blocked']} | {r['escalations']} | "
+            f"{r['schema_error_runs']} | {r['mcp_paused_runs']} | {r['mail_send_runs']} |"
         )
-    return "\n".join(lines)
+    return "\n".join(out)
 
 
-def _write_control(control: dict[str, Any]) -> None:
-    t03_experiment.CONTROL_FILE.parent.mkdir(parents=True, exist_ok=True)
-    t03_experiment.CONTROL_FILE.write_text(json.dumps(control), encoding="utf-8")
-
-
-def _settle(proxy_log: Path, quiet_s: float = 20.0, max_s: float = 120.0) -> None:
-    """Wait until the proxy has been quiet for quiet_s: Hermes makes an auxiliary call (no
-    tools, short prompt) AFTER replying, and it must be attributed to this run, not the next.
-    Not part of the measured turn latency."""
-    deadline = time.monotonic() + max_s
-    last_count, last_change = -1, time.monotonic()
-    while time.monotonic() < deadline:
-        count = len(_read_jsonl(proxy_log))
-        if count != last_count:
-            last_count, last_change = count, time.monotonic()
-        elif time.monotonic() - last_change >= quiet_s:
-            return
-        time.sleep(1.0)
-
-
-def run_once(
-    client: Any, run_id: str, model: str, fixture: t03_fixture.FixtureName, effort: str
-) -> RunResult:
-    _write_control(
-        {"run_id": run_id, "model": model, "reasoning_effort": effort, "fixture": fixture}
-    )
-    started = time.monotonic()
-    status: int | None = None
-    reply = ""
-    try:
-        response = client.post(
-            f"{os.environ.get('HERMES_API_URL', 'http://hermes:8642')}/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {os.environ['HERMES_API_KEY']}",
-                "X-Hermes-Session-Id": f"t03-{run_id}",
-            },
-            json={
-                "model": "hermes-agent",
-                "messages": [{"role": "user", "content": t03_fixture.prompt(fixture)}],
-            },
-            timeout=TURN_TIMEOUT_S,
+def rescore(data: dict[str, Any], q: Any) -> list[Run]:
+    """Score stored runs again from their ledger/audit windows (no new model calls). The vault
+    is read now; it only ever grows, so a placeholder minted after a run counts as known."""
+    vault = {v["placeholder"] for v in q("SELECT placeholder FROM vault")}
+    runs = []
+    for old in data["runs"]:
+        w = old["window"]
+        rows = q(
+            "SELECT * FROM egress_events WHERE id > ? AND id <= ? ORDER BY id",
+            (w["egress_after"], w["egress_to"]),
         )
-        status = response.status_code
-        body = response.json()
-        reply = str(((body.get("choices") or [{}])[0].get("message") or {}).get("content") or "")
-    except Exception as exc:  # timeout or transport error: the run fails, the harness goes on
-        reply = f"<harness error: {type(exc).__name__}>"
-    latency = time.monotonic() - started
-    run_dir = t03_experiment.RECORDINGS_DIR / run_id
-    _settle(run_dir / "proxy.jsonl")
-    return score_run(
-        run_id,
-        model,
-        fixture,
-        status,
-        latency,
-        reply,
-        _read_jsonl(run_dir / "proxy.jsonl"),
-        _read_jsonl(run_dir / "tools.jsonl"),
-    )
+        tools = [
+            a["summary"]
+            for a in q(
+                "SELECT summary FROM audit_events WHERE id > ? AND id <= ? "
+                "AND kind = 'tool_call' ORDER BY id",
+                (w["audit_after"], w["audit_to"]),
+            )
+        ]
+        run = score(
+            old["label"],
+            old["model"],
+            old["status"],
+            old["latency_s"],
+            old["reply"],
+            rows,
+            tools,
+            vault,
+            turn_max_id=w["egress_reply"],
+        )
+        run.window = w
+        runs.append(run)
+    return runs
 
 
 def main(argv: list[str] | None = None) -> int:
     import httpx
 
-    parser = argparse.ArgumentParser(description="T0.3 DG-1 harness")
+    from steward import db
+
+    parser = argparse.ArgumentParser(description="DG-1 through the full Shield")
     parser.add_argument("--runs", type=int, default=10)
-    parser.add_argument("--effort", default=os.environ.get("REASONING_EFFORT", ""))
     parser.add_argument("--models", default=",".join(MODELS))
-    parser.add_argument("--fixtures", default=",".join(FIXTURES))
+    # Hermes pauses an MCP server for ~55 s after 3 rejected calls, for every session. The gap
+    # keeps one run's pause from leaking into the next run, so runs stay independent.
+    parser.add_argument("--gap", type=float, default=60.0, help="seconds between runs")
+    parser.add_argument("--rescore", type=Path, help="re-score a results file; no model calls")
     args = parser.parse_args(argv)
 
-    if not os.environ.get("NEBIUS_API_KEY"):
-        print(
-            "NEBIUS_API_KEY is not set: refusing to start (every run would fail).", file=sys.stderr
-        )
-        return 2
-    labels = [m.strip() for m in args.models.split(",") if m.strip()]
-    fixtures = [f.strip() for f in args.fixtures.split(",") if f.strip()]
+    def q(sql: str, params: tuple = ()) -> list[dict[str, Any]]:
+        return db.with_conn(lambda conn: db.rows(conn.execute(sql, params)))
+
+    def set_primary(model: str) -> None:
+        db.with_conn(lambda conn: db.set_setting(conn, "model_primary", model))
+
+    if args.rescore:
+        data = json.loads(args.rescore.read_text())
+        return report(rescore(data, q), f"{data['stamp']}-rescored")
+
+    original = db.with_conn(lambda conn: db.get_setting(conn, "model_primary"))
     stamp = time.strftime("%Y%m%d-%H%M%S")
-    results: list[RunResult] = []
-    with httpx.Client() as client:
-        for label in labels:
-            for fixture in fixtures:
+    runs: list[Run] = []
+    base = "http://steward-api:8787"
+    headers = {"Host": "127.0.0.1:8787", "X-Steward-Client": "web"}
+    try:
+        with httpx.Client() as client:
+            for label in [m.strip() for m in args.models.split(",") if m.strip()]:
+                model = MODELS[label]
+                set_primary(model)
                 for i in range(1, args.runs + 1):
-                    run_id = f"{stamp}-{label}-{fixture}-{i:02d}"
-                    result = run_once(client, run_id, MODELS[label], fixture, args.effort)  # type: ignore[arg-type]
-                    results.append(result)
+                    if runs:
+                        time.sleep(args.gap)
+                    eg0 = q("SELECT COALESCE(MAX(id), 0) AS m FROM egress_events")[0]["m"]
+                    au0 = q("SELECT COALESCE(MAX(id), 0) AS m FROM audit_events")[0]["m"]
+                    started = time.monotonic()
+                    status, reply = None, ""
+                    try:
+                        r = client.post(
+                            f"{base}/api/chat",
+                            json={"message": PROMPT},
+                            headers=headers,
+                            timeout=TURN_TIMEOUT_S,
+                        )
+                        status = r.status_code
+                        body = r.json()
+                        reply = str(body.get("reply") or body.get("detail") or "")
+                    except Exception as exc:  # the run fails; the harness goes on
+                        reply = f"<harness error: {type(exc).__name__}>"
+                    latency = time.monotonic() - started
+                    eg_reply = q("SELECT COALESCE(MAX(id), 0) AS m FROM egress_events")[0]["m"]
+                    # The session-title auxiliary call lands after the reply: wait until quiet.
+                    last, quiet_since = -1, time.monotonic()
+                    while (
+                        time.monotonic() - quiet_since < 20
+                        and time.monotonic() - started < latency + 120
+                    ):
+                        n = q("SELECT COUNT(*) AS n FROM egress_events WHERE id > ?", (eg0,))[0][
+                            "n"
+                        ]
+                        if n != last:
+                            last, quiet_since = n, time.monotonic()
+                        time.sleep(1)
+                    rows = q("SELECT * FROM egress_events WHERE id > ? ORDER BY id", (eg0,))
+                    tools = [
+                        a["summary"]
+                        for a in q(
+                            "SELECT summary FROM audit_events WHERE id > ? AND kind = 'tool_call' "
+                            "ORDER BY id",
+                            (au0,),
+                        )
+                    ]
+                    vault = {v["placeholder"] for v in q("SELECT placeholder FROM vault")}
+                    run = score(
+                        f"{label}-{i:02d}",
+                        model,
+                        status,
+                        latency,
+                        reply,
+                        rows,
+                        tools,
+                        vault,
+                        turn_max_id=eg_reply,
+                    )
+                    au1 = q("SELECT COALESCE(MAX(id), 0) AS m FROM audit_events")[0]["m"]
+                    eg1 = max([eg0, *(r["id"] for r in rows)])
+                    run.window = {
+                        "egress_after": eg0,
+                        "egress_reply": eg_reply,
+                        "egress_to": eg1,
+                        "audit_after": au0,
+                        "audit_to": au1,
+                    }
+                    runs.append(run)
                     print(
-                        f"{run_id}: success={result.success} order={result.order_ok} "
-                        f"json={result.json_ok} recipient={result.recipient_ok} "
-                        f"ph={result.placeholders_intact}/{result.placeholders_total} "
-                        f"{result.latency_s}s tokens={result.tokens} "
-                        f"tools={result.executed_tools} {'; '.join(result.notes)}",
+                        f"{run.label}: success={run.success} order={run.order_ok} "
+                        f"json={run.json_ok} schema={run.schema_ok} draft={run.draft_ok} "
+                        f"ph={run.placeholders_intact}/{run.placeholders_total} "
+                        f"unresolved={run.unresolved_in_reply} {run.latency_s}s "
+                        f"tokens={run.tokens} tools={run.tools} {'; '.join(run.notes)}",
                         flush=True,
                     )
-    t03_experiment.CONTROL_FILE.unlink(missing_ok=True)
+    finally:
+        if original:
+            set_primary(original)
+    return report(runs, stamp)
 
-    rows = summarize(results)
-    verdict = dg1_verdict(rows)
-    out = t03_experiment.T03_DIR / f"results-{stamp}.json"
+
+def report(runs: list[Run], stamp: str) -> int:
+    rows = summarize(runs)
+    result = verdict(rows)
+    out = Path("/data/t03") / f"results-shield-{stamp}.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(
         json.dumps(
-            {
-                "stamp": stamp,
-                "reasoning_effort": args.effort,
-                "rows": rows,
-                "verdict": verdict,
-                "runs": [asdict(r) for r in results],
-            },
+            {"stamp": stamp, "rows": rows, "verdict": result, "runs": [asdict(r) for r in runs]},
             indent=2,
             ensure_ascii=False,
-        ),
-        encoding="utf-8",
+        )
     )
-    print("\n" + markdown_table(rows))
-    print(f"\nreasoning_effort: {args.effort or '(not sent)'}")
-    print(f"DG-1: {'PASS' if verdict['pass'] else 'FAIL'} {verdict['per_model']}")
+    print("\n" + table(rows))
+    print(
+        f"\nDG-1 through the full Shield: {'PASS' if result['pass'] else 'FAIL'} "
+        f"{result['per_model']}"
+    )
     print(f"results: {out}")
-    return 0
+    return 0 if runs else 1
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(main())

@@ -10,8 +10,8 @@ The stack is fixed. Do not substitute, upgrade or add anything to it.
 
 - **Agent runtime:** Hermes Agent **v2026.9.24**, from the official Docker image `nousresearch/hermes-agent`, pinned by digest. The digest is recorded in T0.4. Never run `hermes update`.
 - **Models:** all served by Nebius Token Factory at `https://api.tokenfactory.nebius.com/v1`. Use only this global URL.
-  - `nvidia/Nemotron-3_5-Lightning` is the default primary.
-  - `nvidia/nemotron-3-super-120b-a12b` is the fallback and escalation model.
+  - `nvidia/nemotron-3-super-120b-a12b` is the primary (set by DG-1 through the full Shield, T2.5; docs/02 §12).
+  - `nvidia/Nemotron-3_5-Lightning` is the fallback and escalation model.
   - `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B` is the 2nd fallback.
   - IDs are case-sensitive. DG-1 finalizes the order.
   - Hermes always requests `steward-auto`, and the proxy picks the real model (D3).

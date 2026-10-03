@@ -54,8 +54,8 @@ def get_settings() -> Settings:
         token_factory_base_url=_env(
             "TOKEN_FACTORY_BASE_URL", "https://api.tokenfactory.nebius.com/v1"
         ).rstrip("/"),
-        model_primary=_env("MODEL_PRIMARY", "nvidia/Nemotron-3_5-Lightning"),
-        model_fallback=_env("MODEL_FALLBACK", "nvidia/nemotron-3-super-120b-a12b"),
+        model_primary=_env("MODEL_PRIMARY", "nvidia/nemotron-3-super-120b-a12b"),
+        model_fallback=_env("MODEL_FALLBACK", "nvidia/Nemotron-3_5-Lightning"),
         model_fallback_2=_env("MODEL_FALLBACK_2", "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B"),
         reasoning_effort=_env("REASONING_EFFORT", "low"),
         tavily_api_key=_env("TAVILY_API_KEY"),

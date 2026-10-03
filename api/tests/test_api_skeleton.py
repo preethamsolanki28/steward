@@ -166,7 +166,7 @@ def test_health_payload_no_keys() -> None:
         "token_factory": "no_key",
         "tavily": "no_key",
         "mail_mode": "demo",
-        "model_primary": "nvidia/Nemotron-3_5-Lightning",
+        "model_primary": "nvidia/nemotron-3-super-120b-a12b",
     }
 
 

@@ -1,129 +1,217 @@
-"""The DG-1 scorer itself (no network): order, JSON validity, recipient, placeholder integrity."""
+"""The DG-1-through-Shield scorer itself (no network)."""
 
 import json
 
-from tests.harness_t03 import dg1_verdict, score_run, summarize
+from tests.harness_t03 import score, summarize, verdict
+
+VAULT = {"[[PERSON_1]]", "[[EMAIL_1]]", "[[MONEY_1]]"}
+GOOD_REPLY = "Hi Rahul Verma,\n\nINV-0042 for $4,800 is overdue.\n\nBest, Maya"
 
 
-def _proxy(*calls: tuple[str, object]) -> list[dict]:
-    tool_calls = [
-        {
-            "function": {
-                "name": name,
-                "arguments": args if isinstance(args, str) else json.dumps(args),
-            }
-        }
-        for name, args in calls
-    ]
-    return [
-        {
-            "status": 200,
-            "response": {
-                "usage": {"prompt_tokens": 100, "completion_tokens": 10},
-                "choices": [{"message": {"tool_calls": tool_calls}}],
+OFFERED = [
+    {
+        "type": "function",
+        "function": {
+            "name": "mcp__steward__mail_search",
+            "parameters": {
+                "type": "object",
+                "properties": {"query": {"type": "string"}, "limit": {"type": "integer"}},
+                "required": ["query"],
             },
-        }
-    ]
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "mcp__steward__mail_read",
+            "parameters": {
+                "type": "object",
+                "properties": {"id": {"type": "string"}},
+                "required": ["id"],
+            },
+        },
+    },
+]
 
 
-GOOD_SEND = {
-    "to": ["[[EMAIL_1]]"],
-    "subject": "INV-0042",
-    "body": "Dear [[PERSON_1]], [[MONEY_1]] is due.",
-}
-
-
-def test_correct_pseudonymized_run_scores_success_and_full_integrity() -> None:
-    tools = [
-        {"tool": "files_read", "args": {"path": "invoices/INV-0042.md"}},
-        {"tool": "mail_search", "args": {"query": "[[ORG_1]]"}},
-        {"tool": "mail_send", "args": GOOD_SEND},
-    ]
-    r = score_run(
-        "r",
-        "m",
-        "pseudonymized",
-        200,
-        12.0,
-        "Queued for [[PERSON_1]].",
-        _proxy(
-            ("mcp__steward__files_read", {"path": "invoices/INV-0042.md"}),
-            ("mcp__steward__mail_search", {"query": "[[ORG_1]]"}),
-            ("mcp__steward__mail_send", GOOD_SEND),
-        ),
-        tools,
-    )
-    assert r.success and r.order_ok and r.json_ok and r.recipient_ok
-    assert (r.placeholders_intact, r.placeholders_total) == (4, 4)
-    assert r.tokens == 110
-
-
-def test_broken_placeholder_and_wrong_order_are_caught() -> None:
-    send = {
-        "to": ["[[EMAIL_1]]"],
-        "subject": "x",
-        "body": "Dear [PERSON_1], [[money_1]] and [[PERSON_9]]",
+def row(
+    content: str | None = None,
+    args: str | None = None,
+    status: str = "ok",
+    escalated: str | None = None,
+    tool: str = "mcp__steward__mail_search",
+    request_text: str = "",
+) -> dict:
+    message: dict = {"content": content}
+    if args is not None:
+        message["tool_calls"] = [{"function": {"name": tool, "arguments": args}}]
+    request = {"messages": [{"role": "tool", "content": request_text}], "tools": OFFERED}
+    return {
+        "channel": "llm",
+        "status": status,
+        "escalated_from": escalated,
+        "prompt_tokens": 100,
+        "completion_tokens": 10,
+        "request_redacted": json.dumps(request),
+        "response_redacted": json.dumps({"choices": [{"message": message}]}),
     }
-    tools = [{"tool": "mail_send", "args": send}, {"tool": "files_read", "args": {"path": "p"}}]
-    r = score_run("r", "m", "pseudonymized", 200, 1.0, "", _proxy(), tools)
-    assert not r.order_ok and not r.success
-    assert r.placeholders_total == 4 and r.placeholders_intact == 1
-    assert set(r.bad_placeholders) == {"[PERSON_1]", "[[money_1]]", "[[PERSON_9]]"}
 
 
-def test_invalid_json_args_fail_the_run() -> None:
-    tools = [
-        {"tool": "files_read", "args": {}},
-        {"tool": "mail_search", "args": {}},
-        {"tool": "mail_send", "args": GOOD_SEND},
-    ]
-    r = score_run(
-        "r",
+TOOLS = ["mcp__steward__files_list", "mcp__steward__files_read", "mcp__steward__mail_search"]
+
+
+def test_good_run() -> None:
+    r = score(
+        "x",
         "m",
-        "plain",
+        200,
+        9.0,
+        GOOD_REPLY,
+        [row(args='{"query": "[[EMAIL_1]]"}'), row("Draft to [[PERSON_1]] for [[MONEY_1]]")],
+        TOOLS,
+        VAULT,
+    )
+    assert r.success and (r.placeholders_intact, r.placeholders_total) == (3, 3)
+    assert r.tokens == 220
+
+
+def test_broken_placeholder_unknown_and_unresolved_reply_fail() -> None:
+    r = score(
+        "x",
+        "m",
+        200,
+        9.0,
+        "Hi Rahul, INV-0042 $4,800 [[PERSON_9]]",
+        [row("Dear [PERSON_1] [[money_1]] [[PERSON_9]]")],
+        TOOLS,
+        VAULT,
+    )
+    assert (r.placeholders_intact, r.placeholders_total) == (0, 3)
+    assert r.unresolved_in_reply == 1 and not r.draft_ok and not r.success
+
+
+def test_block_invalid_json_or_missing_tool_fail() -> None:
+    assert not score("x", "m", 200, 1.0, GOOD_REPLY, [row(status="blocked")], TOOLS, VAULT).success
+    assert not score("x", "m", 200, 1.0, GOOD_REPLY, [row(args="{bad")], TOOLS, VAULT).success
+    assert not score("x", "m", 200, 1.0, GOOD_REPLY, [row("x")], TOOLS[:2], VAULT).success
+
+
+def test_schema_errors_fail_strict_but_not_json_only() -> None:
+    # The M2 failure mode: no mail_send yet, so the model "sends" through mail_read.
+    send_via_read = '{"to": ["[[EMAIL_1]]"], "body": "x", "in_reply_to": "11"}'
+    r = score(
+        "x",
+        "m",
         200,
         1.0,
-        "",
-        _proxy(
-            ("mcp__steward__mail_send", "{not json"), ("mcp__steward__mail_search", {"limit": 3})
-        ),
-        tools,
+        GOOD_REPLY,
+        [row(args=send_via_read, tool="mcp__steward__mail_read")],
+        TOOLS,
+        VAULT,
     )
-    assert not r.json_ok and not r.success
-    assert len(r.invalid_json_args) == 2
+    assert r.json_ok and not r.schema_ok
+    assert r.success_json_only and not r.success
+    assert "mcp__steward__mail_read: missing 'id'" in r.invalid_args
+    assert "mcp__steward__mail_read: unknown 'to'" in r.invalid_args
 
 
-def test_gate_needs_ten_runs_eight_successes_integrity_and_latency() -> None:
-    tools = [
-        {"tool": "files_read", "args": {}},
-        {"tool": "mail_search", "args": {}},
-        {"tool": "mail_send", "args": GOOD_SEND},
+def test_schema_type_mismatch_and_unoffered_tool() -> None:
+    wrong_type = row(args='{"query": "x", "limit": "5"}')
+    unoffered = row(args='{"query": "x"}', tool="mail_search")
+    r = score("x", "m", 200, 1.0, GOOD_REPLY, [wrong_type, unoffered], TOOLS, VAULT)
+    assert r.invalid_args == [
+        "mcp__steward__mail_search: 'limit' is not integer",
+        "mail_search: not an offered tool",
     ]
+    assert not r.success
+
+
+def test_hermes_mcp_pause_is_flagged() -> None:
+    paused = row("x", request_text='{"error": "MCP server \'steward\' rejected the last 3 calls"}')
+    r = score("x", "m", 200, 1.0, GOOD_REPLY, [paused], TOOLS, VAULT)
+    assert r.mcp_paused and "Hermes paused the steward MCP server" in r.notes
+
+
+def test_v1_path_probe_is_reported_not_scored_but_a_real_block_still_fails() -> None:
+    probe = {
+        "channel": "llm",
+        "status": "blocked",
+        "escalated_from": None,
+        "prompt_tokens": None,
+        "completion_tokens": None,
+        "request_redacted": json.dumps({"method": "GET", "path": "/v1/props"}),
+        "response_redacted": None,
+    }
+    good = [row("Draft to [[PERSON_1]]")]
+    r = score("x", "m", 200, 1.0, GOOD_REPLY, [probe, *good], TOOLS, VAULT)
+    assert r.success and r.blocked_rows == 0 and r.llm_rows == 1
+    assert r.notes == ["1 /v1 path probe(s) 404'd (not scored)"]
+    real = {
+        **probe,
+        "request_redacted": json.dumps({"messages": [{"content": "«BLOCKED:PERSON»"}]}),
+    }
+    assert not score("x", "m", 200, 1.0, GOOD_REPLY, [real, *good], TOOLS, VAULT).success
+
+
+def test_gate() -> None:
     runs = [
-        score_run(
+        score(
             f"r{i}",
             "nvidia/Nemotron-3_5-Lightning",
-            "pseudonymized",
             200,
             20.0,
-            "",
-            _proxy(("mcp__steward__mail_send", GOOD_SEND)),
-            tools,
+            GOOD_REPLY,
+            [row("[[PERSON_1]]")],
+            TOOLS,
+            VAULT,
         )
         for i in range(10)
     ]
-    assert dg1_verdict(summarize(runs))["pass"] is True
+    assert verdict(summarize(runs))["pass"] is True
     slow = [
-        score_run(
+        score(
             f"s{i}",
             "nvidia/Nemotron-3_5-Lightning",
-            "pseudonymized",
             200,
             50.0,
-            "",
-            _proxy(("mcp__steward__mail_send", GOOD_SEND)),
-            tools,
+            GOOD_REPLY,
+            [row("[[PERSON_1]]")],
+            TOOLS,
+            VAULT,
         )
         for i in range(10)
     ]
-    assert dg1_verdict(summarize(slow))["pass"] is False
+    assert verdict(summarize(slow))["pass"] is False
+
+
+def test_mail_send_before_t3_1_is_counted_not_scored() -> None:
+    call = row(args='{"to": "[\\"[[EMAIL_1]]\\"]", "body": "x"}', tool="mcp__steward__mail_send")
+    r = score("x", "m", 200, 1.0, GOOD_REPLY, [call], TOOLS, VAULT)
+    assert r.mail_send_attempts == 1 and r.schema_ok and r.success
+    assert "1 mail_send calls (tool not offered before T3.1)" in r.notes
+
+
+def test_post_reply_calls_are_reported_not_scored() -> None:
+    turn = {**row(args='{"query": "x"}'), "id": 5}
+    curator = {**row(args='{"operations": "x"}', tool="skill_manage"), "id": 6}
+    r = score("x", "m", 200, 1.0, GOOD_REPLY, [turn, curator], TOOLS, VAULT, turn_max_id=5)
+    assert r.success and r.post_turn_schema_errors == ["skill_manage: not an offered tool"]
+    late_bad = {**row(args="{bad"), "id": 4}
+    assert not score("x", "m", 200, 1.0, GOOD_REPLY, [late_bad], TOOLS, VAULT, 5).success
+
+
+def test_bare_placeholders_count_as_broken_and_unresolved() -> None:
+    model_out = row("Invoice (ORG_1) for [[PERSON_1]], cc PERSON 3; ⟦PERSON_9⟧ is user text")
+    r = score("x", "m", 200, 1.0, GOOD_REPLY + " (ORG 1)", [model_out], TOOLS, VAULT)
+    assert (r.placeholders_intact, r.placeholders_total) == (1, 3)
+    assert r.unresolved_in_reply == 1 and not r.draft_ok and not r.success
+
+
+def test_draft_turn_and_all_integrity_are_separate() -> None:
+    search = {**row(args='{"query": "ORG_1 invoice"}'), "id": 1}
+    draft = {**row("Hi [[PERSON_1]], [[MONEY_1]] is due"), "id": 2}
+    title = {**row('{"title": "Chase ORG_1 invoice"}'), "id": 3}
+    r = score("x", "m", 200, 1.0, GOOD_REPLY, [search, draft, title], TOOLS, VAULT, 2)
+    assert (r.draft_placeholders_intact, r.draft_placeholders_total) == (2, 2)
+    assert (r.turn_placeholders_intact, r.turn_placeholders_total) == (2, 3)
+    assert (r.placeholders_intact, r.placeholders_total) == (2, 4)

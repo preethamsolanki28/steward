@@ -226,7 +226,7 @@ The persona is Maya Rao (they/them), an independent consultant with 5 clients un
 4. **New chat.** Maya clicks **New chat**. This creates a new conversation id and a new `X-Hermes-Session-Id`, so the fresh memory snapshot now includes the preference.
 5. **Chase the invoice.**
    - Maya clicks the chip "Chase the Acme invoice".
-   - The dashboard shows "Steward is working…" and polls `/api/activity` every 1.5 s. The Activity rail ticks through files_read, mail_search, "Nemotron 3.5 Lightning · N identifiers masked", and mail_send → queued.
+   - The dashboard shows "Steward is working…" and polls `/api/activity` every 1.5 s. The Activity rail ticks through files_read, mail_search, "Nemotron 3 Super · N identifiers masked", and mail_send → queued.
    - The reply, re-identified locally, is a short formal draft to Rahul for INV-0042 / $4,800.
    - If `/api/chat` hits its 300 s timeout, the dashboard shows "Still working — check Approvals and Activity".
 6. **Approve.**

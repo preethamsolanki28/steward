@@ -16,8 +16,9 @@ from steward.shield import Shield
 PROXY_KEY = "test-proxy-key"
 NEBIUS_KEY = "nebius-test-key-123456"
 AUTH = {"Authorization": f"Bearer {PROXY_KEY}"}
-LIGHTNING = "nvidia/Nemotron-3_5-Lightning"
-SUPER = "nvidia/nemotron-3-super-120b-a12b"
+# The chain as configured (docs/02 §12, DG-1 (T2.5)): Super -> Lightning -> Nano 30B.
+PRIMARY = "nvidia/nemotron-3-super-120b-a12b"
+FALLBACK = "nvidia/Nemotron-3_5-Lightning"
 NANO = "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B"
 
 CHASE = {
@@ -138,7 +139,7 @@ def test_only_placeholders_leave_and_response_is_reidentified(env: None) -> None
     for raw in RAW:
         assert raw not in flat, raw
     assert "INV-0042" in flat and "2026-09-20" in flat
-    assert sent["model"] == LIGHTNING and sent["reasoning_effort"] == "low"
+    assert sent["model"] == PRIMARY and sent["reasoning_effort"] == "low"
     assert sent["stream"] is False
     msg = r.json()["choices"][0]["message"]
     with db.connect() as conn:
@@ -148,15 +149,15 @@ def test_only_placeholders_leave_and_response_is_reidentified(env: None) -> None
         "query": vault["[[EMAIL_1]]"]
     }
     (row,) = ledger()
-    assert (row["channel"], row["status"], row["model"]) == ("llm", "ok", LIGHTNING)
+    assert (row["channel"], row["status"], row["model"]) == ("llm", "ok", PRIMARY)
     assert row["destination"] == "api.tokenfactory.nebius.com"
     assert row["entities_masked"] == 7 and json.loads(row["entity_kinds"])["ACCOUNT"] == 2
     assert (row["prompt_tokens"], row["completion_tokens"]) == (1000, 100)
-    assert row["cost_usd"] == pytest.approx(1000 / 1e6 * 0.06 + 100 / 1e6 * 0.24)
+    assert row["cost_usd"] == pytest.approx(1000 / 1e6 * 0.30 + 100 / 1e6 * 0.90)  # Super prices
     for raw in RAW:
         assert raw not in row["request_redacted"]
     (eg,) = audit("egress")
-    assert eg["summary"] == f"Nemotron 3.5 Lightning · {row['entities_masked']} identifiers masked"
+    assert eg["summary"] == f"Nemotron 3 Super · {row['entities_masked']} identifiers masked"
     assert eg["ref_id"] == row["id"]
 
 
@@ -242,8 +243,8 @@ def test_retry_once_on_429_then_success(env: None) -> None:
         httpx.Response(200, json=completion("ok")),
     )
     assert post(up).status_code == 200
-    assert [r["model"] for r in up.requests] == [LIGHTNING, LIGHTNING]
-    assert ledger()[0]["model"] == LIGHTNING
+    assert [r["model"] for r in up.requests] == [PRIMARY, PRIMARY]
+    assert ledger()[0]["model"] == PRIMARY
 
 
 def test_fallback_chain_after_5xx(env: None) -> None:
@@ -251,15 +252,15 @@ def test_fallback_chain_after_5xx(env: None) -> None:
         httpx.Response(500), httpx.Response(503), httpx.Response(200, json=completion("ok"))
     )
     assert post(up).status_code == 200
-    assert [r["model"] for r in up.requests] == [LIGHTNING, LIGHTNING, SUPER]
+    assert [r["model"] for r in up.requests] == [PRIMARY, PRIMARY, FALLBACK]
     row = ledger()[0]
-    assert row["model"] == SUPER and row["escalated_from"] is None
+    assert row["model"] == FALLBACK and row["escalated_from"] is None
 
 
 def test_timeout_walks_the_chain(env: None) -> None:
     up = Upstream(httpx.ReadTimeout("slow"), httpx.Response(200, json=completion("ok")))
     assert post(up).status_code == 200
-    assert [r["model"] for r in up.requests] == [LIGHTNING, SUPER]
+    assert [r["model"] for r in up.requests] == [PRIMARY, FALLBACK]
 
 
 def test_escalation_on_malformed_tool_call(env: None) -> None:
@@ -269,7 +270,7 @@ def test_escalation_on_malformed_tool_call(env: None) -> None:
     )
     assert post(up).status_code == 200
     row = ledger()[0]
-    assert (row["model"], row["escalated_from"]) == (SUPER, LIGHTNING)
+    assert (row["model"], row["escalated_from"]) == (FALLBACK, PRIMARY)
 
 
 def test_escalation_on_empty_reply_when_tools_offered(env: None) -> None:
@@ -278,14 +279,14 @@ def test_escalation_on_empty_reply_when_tools_offered(env: None) -> None:
         httpx.Response(200, json=completion("Here is the draft")),
     )
     assert post(up).status_code == 200
-    assert ledger()[0]["escalated_from"] == LIGHTNING
+    assert ledger()[0]["escalated_from"] == PRIMARY
 
 
 def test_all_models_fail_is_400_upstream_unavailable_with_error_row(env: None) -> None:
     up = Upstream(httpx.Response(502))
     r = post(up)
     assert r.status_code == 400 and r.json()["error"]["code"] == "steward_upstream_unavailable"
-    assert [r["model"] for r in up.requests] == [LIGHTNING] * 2 + [SUPER] * 2 + [NANO] * 2
+    assert [r["model"] for r in up.requests] == [PRIMARY] * 2 + [FALLBACK] * 2 + [NANO] * 2
     (row,) = ledger()
     assert row["status"] == "error" and "HTTP 502" in row["response_redacted"]
 
@@ -307,8 +308,8 @@ def test_missing_key_never_calls_upstream(env: None, monkeypatch: pytest.MonkeyP
 
 def test_model_chain_comes_from_settings(env: None) -> None:
     with db.connect() as conn:
-        db.set_setting(conn, "model_primary", SUPER)
+        db.set_setting(conn, "model_primary", FALLBACK)
         db.set_setting(conn, "reasoning_effort", "")
     up = Upstream(httpx.Response(200, json=completion("ok")))
     post(up)
-    assert up.requests[0]["model"] == SUPER and "reasoning_effort" not in up.requests[0]
+    assert up.requests[0]["model"] == FALLBACK and "reasoning_effort" not in up.requests[0]

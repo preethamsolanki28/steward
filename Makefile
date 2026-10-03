@@ -58,9 +58,8 @@ egress-check: check-docker
 	echo "egress-check: PASS - hermes cannot reach the internet; steward-api is its only reachable host."
 
 ## leak-test: replay recorded Hermes requests through the Shield + live negative control
-leak-test:
-	@echo "TODO(T2.5): make leak-test is implemented in T2.5." >&2
-	@exit 1
+leak-test: check-docker
+	$(COMPOSE) run --rm --no-deps -v ./api/tests:/app/tests:ro steward-api python -m tests.run_leak_test
 
 ## test / lint / typecheck: backend checks (uv) and web typecheck (pnpm)
 test:

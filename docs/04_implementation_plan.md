@@ -269,8 +269,9 @@ How to tick:
   - Each `egress_events` insert also writes `audit_events(kind='egress', summary='<model display name> · N identifiers masked', ref_table='egress_events', ref_id=<id>)` (display names per docs/03 §6.3). Blocked rows write `audit_events(kind='policy_block', summary='Blocked: identifier would have left the Mac', ref_table='egress_events', ref_id=<id>)`. Covered in `tests/test_proxy.py`.
   - `ledger/pricing.py` uses $ per 1M in/out tokens: Lightning $0.06/$0.24, Super $0.30/$0.90, Nano 30B $0.06/$0.24.
   - `/api/ledger/{id}` adds `request_local`/`response_local`. These are re-identified on read and never stored.
-- [ ] **T2.5** — Re-run the T0.3 harness through the full Shield (must meet DG-1); `make leak-test` (0 seeded identifiers across all recorded outbound payloads) — E1 — 2h
+- [x] **T2.5** — Re-run the T0.3 harness through the full Shield (must meet DG-1); `make leak-test` (0 seeded identifiers across all recorded outbound payloads) — E1 — 2h
   - `make leak-test` runs inside steward-api. It replays the committed corpus of Hermes requests recorded in T0.3/T0.4 over the seed data (`api/tests/fixtures/recorded/*.json`) through `walk_strings` + leak check offline, and also scans every `egress_events.request_redacted` row. It fails if any seeded identifier (contact aliases ≥4 chars, emails, GSTIN, UPI, amounts) appears in the outbound text, and it prints the number of payloads scanned, which must be > 0. As a final negative control it POSTs the committed fixture `api/tests/fixtures/recorded/blocked.json` to the live proxy with `STEWARD_PROXY_KEY`. The fixture is a recorded request whose user message contains the token `${STEWARD_MCP_TOKEN}`, substituted at runtime, so no secret is committed. The test passes only if the call returns 400 `steward_policy_block` and writes exactly one `policy_block` audit row and one 'blocked' ledger row with a «BLOCKED:SECRET» span. This is the 'leak-test fixture' used by T4.6, docs/03 §10 and docs/05 shot 5.
+  - Status 2026-10-03: `make leak-test` PASS (335 payloads, 0 seeded identifiers, negative control OK). DG-1 through the full Shield is met on Super only (10/10, draft integrity 100%, p50 13.3 s); Lightning fails (1/10, draft integrity 83.1%: bare placeholders such as `ORG_1` are not re-identified). Decided 2026-10-03: Super is the primary (docs/02 §12, DG-1 (T2.5) row), so the configured primary meets DG-1 through the Shield.
 
 ### M3 — Approval Gate (Day 7–9, 11.5h)
 
@@ -322,7 +323,7 @@ How to tick:
     - "Run now" calls the morning-brief job.
   - Right **Activity** rail, polling `/api/activity?after_id=` every 1.5 s while waiting. It shows:
     - Tool calls with the `mcp__steward__` prefix stripped.
-    - Egress events, e.g. "Nemotron 3.5 Lightning · N identifiers masked".
+    - Egress events, e.g. "Nemotron 3 Super · N identifiers masked".
     - "Memory changed by Steward — review", with the diff in a Tooltip/Sheet.
     - Queued actions.
     - Red "Blocked: identifier would have left the Mac".
@@ -351,7 +352,7 @@ How to tick:
   - Empty state: "Nothing waiting for you. Steward asks before it sends anything."
 - [ ] **T4.4** — Ledger screen + scoped LedgerDiff + stats — E2 — 8h
   - Stats tiles: calls today, identifiers masked, est. cost, blocked.
-  - Table: time, channel llm/web/mail, destination, model, masked, latency, status. Escalated rows show "↑ Super".
+  - Table: time, channel llm/web/mail, destination, model, masked, latency, status. Escalated rows show "↑" + the model used (e.g. "↑ Lightning").
   - Clicking a row opens a right Sheet with the **LedgerDiff**.
   - LedgerDiff header: "nvidia/<model> · api.tokenfactory.nebius.com · ZDR: enabled in our Nebius org (account setting)".
   - Columns: "On your Mac" vs "Sent to Nebius". Two kinds of row get a different right column:
@@ -454,9 +455,10 @@ Tick a box only after you have seen it pass yourself. Runtime items are checked 
 - [x] DG-2 path proven (learned memory applied in a new conversation, or a PUT /api/memory edit applied in the next new conversation)
 
 ### M2
-- [ ] `make leak-test` passes
-- [ ] harness through the Shield meets DG-1
-- [ ] ledger rows readable via API
+- [x] `make leak-test` passes
+- [x] harness through the Shield meets DG-1
+  - 2026-10-03: met on Super (10/10, draft integrity 100%, p50 13.3 s), now the primary (docs/02 §12); Lightning fails.
+- [x] ledger rows readable via API
   - Check: `curl -s 'http://127.0.0.1:8787/api/ledger?channel=llm&limit=50'` and `curl -s http://127.0.0.1:8787/api/ledger/<id>`.
 
 ### M3

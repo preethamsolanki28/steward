@@ -150,7 +150,7 @@ Install these and nothing else. If a pattern seems to need another component (a 
 |---|---|
 | Button | Every action (variants below) |
 | Card | BriefCard, ActionCard, stats tiles, Skills cards, the "Model unavailable" and "Still working" thread cards |
-| Badge | Risk (Low/High), channel (`llm`/`web`/`mail`), ledger and action status, Approvals nav count, "↑ Super" |
+| Badge | Risk (Low/High), channel (`llm`/`web`/`mail`), ledger and action status, Approvals nav count, "↑ Lightning" (escalation) |
 | Tabs | Approvals (Pending / History), Memory & Skills (Memory / Skills / System) |
 | Sheet | Mobile nav; Activity rail (below 1280px); conversation list (below 1024px); Ledger row → LedgerDiff; memory diff review |
 | Dialog | High-risk approve confirmation only |
@@ -160,7 +160,7 @@ Install these and nothing else. If a pattern seems to need another component (a 
 | Separator | Sidebar footer; card sections; Request/Response split in LedgerDiff |
 | ScrollArea | Conversation list, thread, Activity rail, LedgerDiff columns, ActionCard body preview |
 | Skeleton | Loading states (section 8) |
-| Tooltip | Health pill details, truncated values, reason for a disabled Approve (R0), origin of "↑ Super", icon-only buttons |
+| Tooltip | Health pill details, truncated values, reason for a disabled Approve (R0), origin of an "↑" escalation label, icon-only buttons |
 | Alert | Risk reasons, health banner, action failure / "delivery unknown" |
 | Switch (read-only display) | System tab "Privacy Shield: On" (checked + disabled) |
 | Sonner | Toasts ("Sent", network errors) |
@@ -225,7 +225,7 @@ Behaviour:
 | `kind` | What it shows | Treatment | Click |
 |---|---|---|---|
 | `tool_call` | Tool name, e.g. `files_read`, `mail_search` | Muted, mono tool name | None |
-| `egress` | "Nemotron 3.5 Lightning · N identifiers masked" (llm rows; model display name per section 6.3) | Default text | → `/ledger?id=<ref_id>` |
+| `egress` | "Nemotron 3 Super · N identifiers masked" (llm rows; model display name per section 6.3) | Default text | → `/ledger?id=<ref_id>` |
 | `memory_edit` | "Memory changed by Steward — review" | `review` is a link | Opens a Sheet with the unified diff from `detail` (mono; `+` green, `-` red) and an "Open Memory" button → `/memory` |
 | `action_created` | e.g. "mail_send → queued" | Default text | → `/approvals` |
 | `action_decided`, `action_executed` | `summary` as written | Default text | → `/approvals` (History) |
@@ -242,7 +242,7 @@ Behaviour:
 | Ledger status | `ok`: muted text. `error`: amber dot + "error". `blocked`: blocked-chip colours. |
 | Action status (History) | `Executed`: success outline. `Rejected`: neutral outline. `Failed`: solid destructive. `Approved` (transient): neutral outline. |
 | Approvals nav count | Solid primary, white text; hidden when 0 |
-| Escalation | "↑ Super" in the Model cell, neutral outline, mono. Tooltip shows "Escalated from" + `escalated_from`. |
+| Escalation | "↑" + the short name of the model used (e.g. "↑ Lightning") in the Model cell, neutral outline, mono. Tooltip shows "Escalated from" + `escalated_from`. |
 
 ## 6. Screens and navigation
 
@@ -323,7 +323,7 @@ Endpoints:
 |              | Watch topics (Tavily): warehouse robotics   | [tool] files_read      |
 |              |   funding                                   | [tool] mail_search     |
 |              +---------------------------------------------+ [llm]  Nemotron 3.5    |
-|              |                    [ Chase the Acme invoice ]|   Lightning · N        |
+|              |                    [ Chase the Acme invoice ]|   Super · N            |
 |              |                                             |   identifiers masked   |
 |              | Steward is working...                       | [act]  mail_send ->    |
 |              |                                             |   queued               |
@@ -402,7 +402,7 @@ Layout: page title, a row of 4 stats tiles, then the Table. Clicking a row opens
 | Time | `ts`, local `hh:mm:ss` |
 | Channel | `channel` Badge `llm` / `web` / `mail` |
 | Destination | `destination` host, mono |
-| Model | Short name, or "↑ Super" when `escalated_from` is set; "—" for web/mail |
+| Model | Short name, prefixed "↑" when `escalated_from` is set (e.g. "↑ Lightning"); "—" for web/mail |
 | Masked | `entities_masked`, tabular |
 | Latency | `latency_ms` as seconds with 1 decimal |
 | Status | `ok` / `error` / `blocked` Badge |
@@ -437,15 +437,15 @@ The `channel` query parameter exists in the API, but the MVP UI does not expose 
 | | N            | | N                  | | $N          | | N         |          |
 | +--------------+ +--------------------+ +-------------+ +-----------+          |
 | Time      Chan   Destination                   Model      Masked Latency Status|
-| hh:mm:ss  [llm]  api.tokenfactory.nebius.com   Lightning  N      N s     ok    |
-| hh:mm:ss  [llm]  api.tokenfactory.nebius.com   ↑ Super    N      N s     ok    |
+| hh:mm:ss  [llm]  api.tokenfactory.nebius.com   Super      N      N s     ok    |
+| hh:mm:ss  [llm]  api.tokenfactory.nebius.com   ↑ Lightning N     N s     ok    |
 | hh:mm:ss  [web]  <destination>                 -          0      N s     ok    |
-| hh:mm:ss  [llm]  api.tokenfactory.nebius.com   Lightning  N      -   [blocked] |
+| hh:mm:ss  [llm]  api.tokenfactory.nebius.com   Super      N      -   [blocked] |
 +--------------------------------------------------------------------------------+
 
 Row Sheet (right):
 +---------------------------------------------------------------------------+
-| nvidia/Nemotron-3_5-Lightning · api.tokenfactory.nebius.com ·         [x] |
+| nvidia/nemotron-3-super-120b-a12b · api.tokenfactory.nebius.com ·     [x] |
 | ZDR: enabled in our Nebius org (account setting)                          |
 | hh:mm:ss · N identifiers masked · N s · $N · ok                           |
 +-------------------------------------+-------------------------------------+
@@ -517,7 +517,7 @@ Skills tab:
 
 System tab:
   Connectors       (o) Hermes  (o) Token Factory  (o) Tavily   mail: demo
-  Model chain      nvidia/Nemotron-3_5-Lightning -> nvidia/nemotron-3-super-120b-a12b
+  Model chain      nvidia/nemotron-3-super-120b-a12b -> nvidia/Nemotron-3_5-Lightning
   Reasoning effort <reasoning_effort>
   Privacy Shield   [=on] On   (disabled Switch)
   ZDR              ZDR is an org-level setting in your Token Factory profile;

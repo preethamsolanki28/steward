@@ -161,7 +161,7 @@ function health(scenario: FixtureScenario): HealthResponse {
     token_factory: scenario === "tf_down" ? "down" : scenario === "tf_no_key" ? "no_key" : "up",
     tavily: scenario === "tavily_down" ? "no_key" : "up",
     mail_mode: "demo",
-    model_primary: LIGHTNING,
+    model_primary: SUPER,
   };
 }
 
@@ -331,16 +331,16 @@ function ledgerRows(scenario: FixtureScenario): LedgerRow[] {
   ): LedgerRow => ({ id, ts: minutesAgo(m), channel, destination, model, escalated_from, entities_masked, latency_ms, cost_usd, status });
   return [
     r(6, 4, "llm", TF_HOST, NANO, null, 3, 60_400, 0, "error"),
-    r(5, 5, "llm", TF_HOST, LIGHTNING, null, 0, 0, 0, "blocked"),
+    r(5, 5, "llm", TF_HOST, SUPER, null, 0, 0, 0, "blocked"),
     r(4, 7, "mail", "smtp.gmail.com", null, null, 0, 1_850, 0, "ok"),
-    r(2, 12, "llm", TF_HOST, SUPER, LIGHTNING, 7, 21_300, 0.0071, "ok"),
-    r(1, 12, "llm", TF_HOST, LIGHTNING, null, 7, 9_800, 0.0013, "ok"),
+    r(2, 12, "llm", TF_HOST, LIGHTNING, SUPER, 7, 21_300, 0.0071, "ok"),
+    r(1, 12, "llm", TF_HOST, SUPER, null, 7, 9_800, 0.0013, "ok"),
     r(3, 299, "web", "api.tavily.com", null, null, 0, 1_240, 0, "ok"),
   ];
 }
 
 const LOCAL_REQ = {
-  model: LIGHTNING,
+  model: SUPER,
   messages: [
     { role: "system", content: "<Hermes system prompt with the memory snapshot and skills index>" },
     { role: "user", content: "Chase the Acme invoice" },
@@ -353,7 +353,7 @@ const LOCAL_REQ = {
   ],
 };
 const SENT_REQ = {
-  model: LIGHTNING,
+  model: SUPER,
   messages: [
     { role: "system", content: "<Hermes system prompt with the memory snapshot and skills index>" },
     { role: "user", content: "Chase the [[ORG_1]] invoice" },
@@ -391,7 +391,7 @@ function ledgerDetail(row: LedgerRow): LedgerDetail {
       break;
   }
   if (row.status === "blocked") {
-    const blocked = pretty({ model: LIGHTNING, messages: [{ role: "user", content: "Use token «BLOCKED:SECRET» to call the tools" }] });
+    const blocked = pretty({ model: SUPER, messages: [{ role: "user", content: "Use token «BLOCKED:SECRET» to call the tools" }] });
     return { ...base, request_redacted: blocked, response_redacted: null, request_local: blocked, response_local: null };
   }
   return {
@@ -442,7 +442,7 @@ const SKILLS: Skill[] = [
 
 function settings(): SettingsResponse {
   // reasoning_effort is set by DG-1; "low" is only the docs' example value.
-  return { model_primary: LIGHTNING, model_fallback: SUPER, reasoning_effort: "low", mail_mode: "demo", shield: "on", zdr_note: ZDR_NOTE };
+  return { model_primary: SUPER, model_fallback: LIGHTNING, reasoning_effort: "low", mail_mode: "demo", shield: "on", zdr_note: ZDR_NOTE };
 }
 
 // --- request router ---------------------------------------------------------------------------

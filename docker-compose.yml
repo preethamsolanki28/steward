@@ -13,8 +13,8 @@ services:
     environment:
       NEBIUS_API_KEY: ${NEBIUS_API_KEY:-}
       TOKEN_FACTORY_BASE_URL: ${TOKEN_FACTORY_BASE_URL:-https://api.tokenfactory.nebius.com/v1}
-      MODEL_PRIMARY: ${MODEL_PRIMARY:-nvidia/Nemotron-3_5-Lightning}
-      MODEL_FALLBACK: ${MODEL_FALLBACK:-nvidia/nemotron-3-super-120b-a12b}
+      MODEL_PRIMARY: ${MODEL_PRIMARY:-nvidia/nemotron-3-super-120b-a12b}
+      MODEL_FALLBACK: ${MODEL_FALLBACK:-nvidia/Nemotron-3_5-Lightning}
       MODEL_FALLBACK_2: ${MODEL_FALLBACK_2:-nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B}
       REASONING_EFFORT: ${REASONING_EFFORT:-low}
       TAVILY_API_KEY: ${TAVILY_API_KEY:-}
