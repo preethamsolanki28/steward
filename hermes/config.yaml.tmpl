@@ -29,23 +29,31 @@ agent:
 
 # T0.4 finding: v2026.9.24 defaults to progressive tool disclosure (tools.tool_search.enabled:
 # auto), which hides MCP tools behind three bridge tools (tool_search / tool_describe /
-# tool_call) and defers session_search. Off = the model sees mcp_steward_* and session_search
+# tool_call) and defers session_search. Off = the model sees mcp__steward__* and session_search
 # directly, as docs/02 §7a step 2 assumes.
 tools:
   tool_search:
     enabled: "off"
 
-# Only our two skills load: repo skills/ is mounted read-only here, and
-# /opt/data/.no-bundled-skills exists before first boot (make init).
+# Our two skills come from repo skills/, mounted read-only here; /opt/data/.no-bundled-skills
+# exists before first boot (make init). Hermes still lists its essential bundled `hermes-agent`
+# skill in the index (it cannot be disabled; docs/feedback_log.md).
 skills:
   external_dirs: [/opt/steward-skills]
   write_approval: true
+  # T5.6 (2026-10-04): pin the invoice-chase body into every chat session's system prompt.
+  # Hermes's skills index shows each skill as name + a 57-char description, and the body (steps
+  # incl. "read the latest thread", and the safety rules) reaches the model only through
+  # skill_view, which Nemotron Super calls only occasionally. auto_load is Hermes's documented
+  # pin; it does not apply to Steward's workdir-less cron jobs, which already get their skill
+  # body from the job's `skills` field (api/steward/jobs.py).
+  auto_load: [invoice-chase]
 
 memory:
   write_approval: false
 
 # The steward MCP server (steward-tools in steward-api). The model sees its tools as
-# mcp_steward_<name>. Hermes fills ${STEWARD_MCP_TOKEN} from its container environment.
+# mcp__steward__<name>. Hermes fills ${STEWARD_MCP_TOKEN} from its container environment.
 mcp_servers:
   steward:
     url: http://steward-api:8787/mcp
