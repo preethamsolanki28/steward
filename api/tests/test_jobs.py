@@ -88,3 +88,82 @@ def test_hermes_down_raises_so_startup_retries() -> None:
     with pytest.raises(httpx.ConnectError):
         anyio.run(go)
     assert _stored() is None
+
+
+# --- STEWARD_DEMO=1 one-shot job (T5.2) ---------------------------------------------------------
+
+
+# conftest stubs jobs.register_on_startup for every test; keep the real one (captured at import).
+REAL_REGISTER_ON_STARTUP = jobs.register_on_startup
+
+
+def _startup(fake: FakeHermes) -> None:
+    async def go() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(fake)) as client:
+            await REAL_REGISTER_ON_STARTUP(client)
+
+    anyio.run(go)
+
+
+@pytest.fixture
+def fresh_jobs_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(jobs, "_last_manual_trigger", None)
+    monkeypatch.setattr(jobs, "_demo_registered_at", None)
+
+
+def test_demo_off_registers_only_the_daily_job(fresh_jobs_state: None) -> None:
+    db.init_schema()
+    fake = FakeHermes()
+    _startup(fake)
+    assert [p["name"] for p in fake.posts] == ["morning-brief"]
+    assert jobs.skill_run_summary() == "morning-brief · scheduled run"
+
+
+def test_demo_on_registers_a_one_shot_of_the_same_skill(
+    fresh_jobs_state: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("STEWARD_DEMO", "1")
+    db.init_schema()
+    fake = FakeHermes()
+    _startup(fake)
+    assert [p["name"] for p in fake.posts] == ["morning-brief", "morning-brief-demo"]
+    demo = fake.posts[1]
+    assert demo == {
+        "name": "morning-brief-demo",
+        "schedule": "in 2m",
+        "skills": ["morning-brief"],
+        "prompt": "Run the morning-brief skill.",
+        "deliver": "local",
+    }
+    # The daily job id stays the one in settings (Run now / brief-now keep using it).
+    assert _stored() == "job1"
+
+
+def test_demo_brief_is_labelled_as_a_demo_one_shot(
+    fresh_jobs_state: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("STEWARD_DEMO", "1")
+    db.init_schema()
+    _startup(FakeHermes())
+    assert jobs.skill_run_summary() == "morning-brief · scheduled run (demo one-shot)"
+    jobs.record_manual_trigger()  # a manual run is still labelled as one
+    assert jobs.skill_run_summary() == "morning-brief · run now"
+
+
+def test_demo_label_expires_after_the_window(
+    fresh_jobs_state: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(jobs, "_demo_registered_at", 1000.0)
+    monkeypatch.setattr(jobs.time, "monotonic", lambda: 1000.0 + jobs.DEMO_WINDOW_S + 1)
+    assert jobs.skill_run_summary() == "morning-brief · scheduled run"
+
+
+def test_demo_restart_with_existing_daily_job_still_adds_the_one_shot(
+    fresh_jobs_state: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("STEWARD_DEMO", "1")
+    db.init_schema()
+    fake = FakeHermes([{"id": "daily", "name": "morning-brief"}])
+    _startup(fake)
+    assert [p["name"] for p in fake.posts] == ["morning-brief-demo"]
+    assert _stored() == "daily"
