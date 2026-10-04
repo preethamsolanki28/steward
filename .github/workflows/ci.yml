@@ -1,14 +1,19 @@
 name: ci
 
+# T5.7 (docs/04): ruff, pyright, pytest, the web production build, then the real stack under
+# docker compose with /api/health. No secrets are used: with empty NEBIUS_API_KEY/TAVILY_API_KEY
+# /api/health still answers ok with token_factory/tavily "no_key"; no model call is ever made.
+
 on:
   push:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
-  # T3.5: the Approval Gate tests (and the rest of the suite) need no network and no secrets.
-  # TODO(T5.7): add ruff, pyright, pnpm build, and compose up + /api/health.
-  pytest:
+  backend:
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -21,12 +26,60 @@ jobs:
           python-version: "3.12"
       - name: Install locked dependencies
         run: uv sync --locked
-      - name: Run tests
+      - name: ruff
+        run: uv run ruff check .
+      - name: pyright
+        run: uv run pyright
+      - name: pytest (no network, no secrets; includes the Approval Gate E2E, T3.5)
         run: uv run pytest
 
-  compose-config:
+  web:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
     steps:
       - uses: actions/checkout@v4
-      - name: Validate docker-compose.yml
-        run: cp .env.example .env && docker compose config --quiet
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Enable corepack (pnpm pinned by package.json packageManager)
+        run: corepack enable
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+      - name: tsc --noEmit
+        run: pnpm exec tsc --noEmit
+      - name: pnpm build (static export to web/out)
+        run: pnpm build
+
+  compose:
+    runs-on: ubuntu-latest
+    needs: [backend, web]
+    steps:
+      - uses: actions/checkout@v4
+      - name: .env from the example (no secrets)
+        run: cp .env.example .env
+      - name: make up (init renders the Hermes config and chowns data/ + workspace/ to 10000:10000 via sudo -n)
+        run: make up
+      - name: Wait for both services to be healthy
+        run: |
+          for i in $(seq 1 60); do
+            api=$(docker inspect -f '{{.State.Health.Status}}' "$(docker compose ps -q steward-api)")
+            hermes=$(docker inspect -f '{{.State.Health.Status}}' "$(docker compose ps -q hermes)")
+            echo "steward-api=$api hermes=$hermes"
+            if [ "$api" = healthy ] && [ "$hermes" = healthy ]; then exit 0; fi
+            sleep 5
+          done
+          exit 1
+      - name: /api/health
+        run: |
+          body=$(curl -fsS http://127.0.0.1:8787/api/health)
+          echo "$body"
+          echo "$body" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["ok"] is True and d["hermes"] == "up" and d["mail_mode"] == "demo", d'
+      - name: Hermes cannot reach the internet (make egress-check)
+        run: make egress-check
+      - name: Service logs on failure (logs never contain request or response bodies)
+        if: failure()
+        run: docker compose logs --no-color --tail 200
