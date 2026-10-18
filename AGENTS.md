@@ -67,6 +67,8 @@ Add nothing else without asking. The docs foresee three exceptions, and each one
 
 Read docs/00_problem.md, docs/01_prd.md, docs/02_architecture.md, docs/03_design.md, docs/04_implementation_plan.md and docs/05_demo_and_pitch.md before writing code.
 
+**Active plan from 2026-10-18: docs/06_finish_plan.md.** It replaces the remaining docs/04 tasks (docs/04 is history) and adds the plain-words UI rules (section 4).
+
 All six docs are written from one locked spec. Take names exactly as the docs give them: tables and columns, endpoints, MCP tool names, env vars, screens, colours, task IDs and decision IDs (D1–D20). If the docs disagree with each other or with the code, stop and ask; do not pick one yourself.
 
 ## Working rules
@@ -78,7 +80,7 @@ All six docs are written from one locked spec. Take names exactly as the docs gi
 
 ### Task discipline
 
-- **Reference the TASK-ID** (T0.1–T5.7, TS1–TS5) in the branch name, commit messages, PR title and any TODO.
+- **Reference the TASK-ID** (T0.1–T5.7, TS1–TS5, and N0–N16 from docs/06) in the branch name, commit messages, PR title and any TODO.
 - **A task is done** when its tests pass and `make lint typecheck test` is green.
 - **A milestone is done** only when its Done-when in docs/04 holds.
 - **Use only what the docs define.** Do not add endpoints, tables, columns, screens, MCP tools or env vars.

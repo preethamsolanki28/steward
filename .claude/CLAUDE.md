@@ -2,14 +2,11 @@
 
 Hackathon entry for the Nebius x NVIDIA Global AI Hackathon (Devpost, Personal AI Track). Deadline Fri Oct 30, 2026, 10:00 AM PDT; team target is final submission by Fri Oct 23.
 
-## Where we are (as of Fri Oct 2, 2026)
+## Where we are (as of Sun Oct 18, 2026)
 
-- Planning is complete. No code exists yet.
-- Build Day 1 = Sat Oct 3, 2026 (Day N = Oct 2+N).
-- First actions:
-  1. **T0.2** (E2, first hour of Day 1): Token Factory accounts + promo credits, ZDR on, Tavily key, hand the API keys to E1.
-  2. **T0.3 + T0.4** (E1, Days 1–2): the riskiest-assumption test and the Hermes probe.
-  3. Record the **DG-1** and **DG-2** results in `docs/02_architecture.md` §12 before building anything on top.
+- M0–M4 are done; M5 is partly done (invoice-chase fix 10/10, STEWARD_DEMO one-shot, CI file, README draft on `t5-3-readme`).
+- **Follow docs/06_finish_plan.md** (it replaces docs/04's remaining tasks). First: N1 (the demo brief job never runs after `make demo-reset`), N3 (model fallback), N4 (plain-words UI).
+- Target submission Fri Oct 23; hard deadline Fri Oct 30, 10:00 AM PDT.
 
 ## Source of truth
 

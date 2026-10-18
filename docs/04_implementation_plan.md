@@ -1,5 +1,7 @@
 # Steward — Implementation Plan
 
+> **From 2026-10-18 the remaining work follows [docs/06_finish_plan.md](06_finish_plan.md).** This file is kept as history; its unticked tasks are replaced by the N-tasks there.
+
 ## 1. Milestones M0 to M5
 
 Calendar rule: Build Day 1 = Sat Oct 3, 2026, and Day N = Oct (2+N). **E1** = agent/backend. **E2** = frontend/product; E2 also owns several pure-Python tasks so both engineers know the backend. Capacity is about 6 focused hours per day each, over 13 days.
